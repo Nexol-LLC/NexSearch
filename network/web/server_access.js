@@ -15,4 +15,9 @@ if(location.protocol==='https:'){
   if(path==='/api/auth/logout'&&response.ok){store.removeItem('nexsearch.token');store.removeItem('nexsearch.profile')}
   return response;
  };
+ document.addEventListener('click',async event=>{
+  const link=event.target.closest('a[href^="/api/export"]');if(!link)return;event.preventDefault();
+  const response=await fetch(link.getAttribute('href'));if(!response.ok)return;
+  const object=URL.createObjectURL(await response.blob()),download=document.createElement('a');download.href=object;download.download='NexSearch.xlsx';download.click();setTimeout(()=>URL.revokeObjectURL(object),3000);
+ });
 }

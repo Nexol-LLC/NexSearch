@@ -28,7 +28,9 @@ def home_for(kind,trust=None):
 class Instance:
     def __init__(self,home):
         home.mkdir(parents=True,exist_ok=True);self.url_file=home/'interface.json'
-        self.file=(home/'instance.lock').open('a+b');self.file.seek(0);self.file.write(b'0');self.file.flush();self.file.seek(0)
+        self.file=(home/'instance.lock').open('a+b')
+        if os.fstat(self.file.fileno()).st_size==0:self.file.write(b'0');self.file.flush()
+        self.file.seek(0)
     def acquire(self):
         try:
             if os.name=='nt':
