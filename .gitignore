@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.runtime/
+build/
+dist/
+preview/
+backups/
+identity/
+*.sec
+*.enc
+*.pem
+!updates-public.pem
+*.dump
+*.db
+*.sqlite*
+*.env
+.env*
+Данные хоста/
+host.env

@@ -1,0 +1,62 @@
+name: Build signed NexSearch updates
+on:
+  push:
+    branches: [host, employe]
+    paths-ignore: ['.updates/**', '**/*.md']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nexsearch-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install 'cryptography>=43,<47'
+      - name: Sign source package
+        env:
+          NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
+        run: |
+          if [ "${GITHUB_REF_NAME}" = host ]; then
+            python package_update.py HostUbuntu --output .updates/host-linux.zip --commit "$GITHUB_SHA"
+          else
+            python package_update.py EmployeeMac --output .updates/employee-mac.zip --commit "$GITHUB_SHA"
+          fi
+      - uses: actions/upload-artifact@v4
+        with: {name: signed-source, path: '.updates/*.zip'}
+  windows:
+    if: github.ref_name == 'employe'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r network/requirements.txt pyinstaller
+      - run: python build_windows.py EmployeeWindows
+      - run: python build_windows.py Maintenance
+      - name: Sign Windows package
+        env:
+          NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
+        run: python package_update.py EmployeeWindows --output .updates/employee-windows.zip --commit $env:GITHUB_SHA
+      - uses: actions/upload-artifact@v4
+        with: {name: signed-windows, path: '.updates/*.zip'}
+  publish:
+    if: always() && needs.source.result == 'success' && (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+    needs: [source, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'signed-*', merge-multiple: true, path: .updates}
+      - name: Commit artifacts to their source branch
+        run: |
+          git config user.name 'NexSearch Builds'
+          git config user.email 'nexsearch-builds@users.noreply.github.com'
+          git add .updates
+          git commit -m "Publish signed updates for ${GITHUB_SHA}" || exit 0
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"

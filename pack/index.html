@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PackOnTruck — схема погрузки</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f5; color: #1b1f24; font-size: 14px; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 16px; background: #2c3e50; color: #fff; height: 48px; }
+  header h1 { font-size: 16px; margin: 0; white-space: nowrap; }
+  #truckNav { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center; }
+  #truckNav button { min-width: 32px; }
+  #truckLabel { font-weight: 600; min-width: 220px; text-align: center; }
+  main { position: relative; height: calc(100vh - 48px); }
+  #scene { position: absolute; inset: 0; }
+
+  /* Сворачиваемая левая панель */
+  #panel { position: absolute; left: 0; top: 0; bottom: 0; width: 645px; background: #fff;
+           box-shadow: 2px 0 12px rgba(0,0,0,.12); z-index: 10; padding: 12px 14px 12px 16px;
+           overflow-y: auto; transition: transform .25s ease; }
+  #panel.collapsed { transform: translateX(calc(-100% + 28px)); }
+  #panelHandle { position: absolute; right: 0; top: 0; bottom: 0; width: 28px; cursor: pointer;
+                 background: #2c7be5; color: #fff; display: flex; align-items: center; justify-content: center;
+                 writing-mode: vertical-rl; font-size: 11px; letter-spacing: 1px; user-select: none; }
+  #panelPin { position: absolute; right: 34px; top: 8px; border: none; background: #f0f3f7;
+              border-radius: 5px; cursor: pointer; padding: 4px 8px; }
+  #panelPin.on { background: #ffd600; }
+  #panelBody { margin-right: 30px; }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .4px; color: #5a6472; margin: 14px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  h3.secTitle { font-size: 12.5px; margin: 12px 0 4px; color: #2c3e50; border-top: 1px solid #d6dce4; padding-top: 8px; }
+  select, input, button { font: inherit; padding: 5px 7px; border: 1px solid #c6ccd4; border-radius: 5px; }
+  select { background: #fff; }
+  button { cursor: pointer; background: #f4f6f8; }
+  button.primary { background: #2c7be5; border-color: #2c7be5; color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  header button { background: #3d5266; border-color: #3d5266; color: #fff; }
+  #customVeh { display: none; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  #customVeh label { font-size: 11px; color: #5a6472; display: block; }
+  #customVeh input { width: 100%; }
+  table.cargo { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  table.cargo th { font-size: 10.5px; color: #5a6472; text-align: left; padding: 2px 2px; font-weight: 600; }
+  table.cargo td { padding: 2px 2px; }
+  table.cargo input { padding: 4px 5px; }
+  table.cargo input.num { width: 50px; }
+  table.cargo input.c-q { width: 50px; }
+  table.cargo input.tiers { width: 44px; }
+  table.cargo input.c-name { width: 92px; }
+  table.cargo input.c-grp { width: 66px; }
+  table.cargo .del { font-weight: 700; }
+  /* без стрелок +/- на размерах и весе; стрелки остаются у количества и ярусов */
+  input.noarrow::-webkit-outer-spin-button,
+  input.noarrow::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input.noarrow { -moz-appearance: textfield; appearance: textfield; }
+  table.cargo .del { border: none; background: none; color: #c0392b; font-size: 16px; padding: 0 4px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  #stats table { border-collapse: collapse; width: 100%; }
+  #stats td { border-bottom: 1px solid #e4e8ee; padding: 4px 6px; }
+  #stats td:last-child { text-align: right; font-weight: 600; }
+  .warn { color: #c0392b; }
+  #stats tr.warn td { color: #c0392b; }
+  .hint { font-size: 11px; color: #7a8494; margin-top: 6px; }
+
+  /* Тулбар выделенного места */
+  #boxbar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+            background: #fff; border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.18);
+            padding: 8px 10px; display: none; gap: 6px; z-index: 20; align-items: center;
+            max-width: calc(100% - 48px); flex-wrap: wrap; justify-content: center; }
+  #boxbar.show { display: flex; }
+  #boxbar .lbl { font-size: 12px; color: #5a6472; margin-right: 6px; max-width: 180px;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #boxbar button { font-size: 12.5px; }
+  #boxbar .danger { color: #c0392b; }
+
+  /* Предупреждение о пересечениях */
+  #overlapBanner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+                   background: #fdecea; color: #c0392b; border: 1px solid #f5c6c1; font-weight: 600;
+                   border-radius: 8px; padding: 8px 16px; display: none; z-index: 9; }
+  #overlapBanner.show { display: block; }
+  #dragHint { position: absolute; bottom: 8px; right: 12px; font-size: 11px; color: #8a97a8; z-index: 5; }
+
+  /* Дубликат результатов в правом углу, прозрачный фон */
+  #statsOverlay { position: absolute; top: 10px; right: 12px; width: 300px; z-index: 6;
+                  pointer-events: none; font-size: 12px; color: #37474f;
+                  text-shadow: 0 1px 2px rgba(255,255,255,.85); max-height: calc(100% - 60px);
+                  overflow: hidden; }
+  #statsOverlay table { border-collapse: collapse; width: 100%; }
+  #statsOverlay td { padding: 2px 6px; border-bottom: 1px solid rgba(90,100,114,.18); }
+  #statsOverlay td:last-child { text-align: right; font-weight: 600; }
+  #statsOverlay h3.secTitle { border-top: 1px solid rgba(90,100,114,.25); background: none; }
+  #statsOverlay tr.warn td, #statsOverlay .warn { color: #c0392b; }
+  #statsOverlay .hint { color: #7a8494; }
+
+  /* Заглушка «отсек не выбран» */
+  #noSpace { position: absolute; inset: 0; display: none; align-items: center;
+             justify-content: center; z-index: 8; }
+  #noSpace.show { display: flex; }
+  #noSpaceBox { background: rgba(255,255,255,.92); border: 1px solid #d6dce4; border-radius: 12px;
+                padding: 26px 34px; text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,.15); }
+  #noSpaceBox h2 { margin: 0 0 8px; text-transform: none; font-size: 17px; color: #2c3e50; }
+  #noSpaceBox p { margin: 0 0 14px; color: #5a6472; }
+
+  /* Модальное окно каталога */
+  #catModal { position: fixed; inset: 0; background: rgba(20,28,38,.45); z-index: 50;
+              display: none; align-items: center; justify-content: center; }
+  #catModal.show { display: flex; }
+  #catBox { background: #fff; border-radius: 12px; width: 760px; max-width: 94vw;
+            max-height: 84vh; display: flex; flex-direction: column; box-shadow: 0 12px 48px rgba(0,0,0,.3); }
+  #catHead { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #e4e8ee; }
+  #catHead h2 { margin: 0; flex: 1; }
+  #catSearch { width: 220px; }
+  #catClose { border: none; background: none; font-size: 20px; cursor: pointer; color: #5a6472; }
+  #catList { overflow-y: auto; padding: 4px 8px 12px; }
+  table.cat { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  table.cat th { position: sticky; top: 0; background: #f4f6f8; text-align: left;
+                 padding: 6px 8px; font-size: 11px; color: #5a6472; }
+  table.cat td { padding: 5px 8px; border-bottom: 1px solid #eef1f5; }
+  table.cat tr.pick { cursor: pointer; }
+  table.cat tr.pick:hover { background: #e8f1fd; }
+  table.cat td.cls { color: #8a97a8; white-space: nowrap; }
+</style>
+<link rel="stylesheet" href="src/advanced14.css"></head>
+<body>
+<header>
+  <h1 data-i18n="title">PackOnTruck</h1>
+  <div id="truckNav">
+    <button id="navPrev">‹</button>
+    <span id="truckLabel"></span>
+    <button id="navNext">›</button>
+    <button id="btnDelSpace" data-i18n="delSpace" title="Убрать текущий отсек">Убрать отсек</button>
+  </div>
+  <select id="langSel"><option value="ru">Русский</option><option value="en">English</option></select>
+</header>
+<main>
+  <div id="scene"></div>
+
+  <div id="panel">
+    <div id="panelHandle">P A C K O N T R U C K</div>
+    <button id="panelPin" title="Закрепить панель">📌</button>
+    <div id="panelBody">
+<div class="advanced-toolbar"><button id="undo-plan" disabled>↶ Отменить</button><button id="redo-plan" disabled>↷ Повторить</button><button id="edit-deck">Площадка</button><button id="edit-gear">Оси и масса</button></div>
+<div class="advanced-toolbar"><label>Вариант <select id="packing-mode"><option value="capacity">Вместимость</option><option value="balance">Баланс</option><option value="unloading">Порядок выгрузки</option></select></label><button id="view-3d">3D</button><button id="view-top">Сверху</button><button id="view-side">Сбоку</button></div>
+<p class="hint" id="planning-state"></p><div id="planning-alternatives"></div><div id="unplaced-reasons"></div>
+<div id="shipment-context" hidden></div>
+      <h2 data-i18n="vehicle">Грузовая площадь</h2>
+      <div style="display:flex;gap:7px">
+        <select id="vehSel" style="flex:1"></select>
+        <button id="btnAddSpace" class="primary" data-i18n="addSpace">+ Площадь</button>
+      </div>
+      <div id="customVeh">
+        <div><label data-i18n="length">Длина, мм</label><input id="cvL" type="number" value="13600"></div>
+        <div><label data-i18n="width">Ширина, мм</label><input id="cvW" type="number" value="2450"></div>
+        <div><label data-i18n="height">Высота, мм</label><input id="cvH" type="number" value="2450"></div>
+        <div><label data-i18n="payload">Г/п, кг</label><input id="cvP" type="number" value="22000"></div>
+      </div>
+
+      <div id="trailerSettings" hidden style="background:#f0edff;border-radius:8px;padding:12px;margin-top:12px">
+<h2>Площадка трала</h2><p id="trailerInfo" class="hint"></p>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+<label>Длина площадки, мм<input id="trailerL" type="number" style="width:100%"></label>
+<label>Ширина, мм<input id="trailerW" type="number" style="width:100%"></label>
+<label>Высота груза, мм<input id="trailerH" type="number" style="width:100%" value="4000"></label></div>
+<a id="trailerPdf" target="_blank" rel="noopener">Технический лист прицепа</a>
+<p class="hint">Раздвижка добавляется к полезной площадке. Перед расчётом уточните её фактический размер у перевозчика.</p></div>
+<h2>Негабаритная погрузка</h2><label><input id="oversizeEnabled" type="checkbox"> Разрешить заданные свесы</label>
+      <div id="oversizeFields" style="display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:9px">
+        <label>Спереди, мм<input id="overFront" type="number" min="0" value="0" style="width:100%"></label><label>Сзади, мм<input id="overRear" type="number" min="0" value="2000" style="width:100%"></label>
+        <label>Слева, мм<input id="overLeft" type="number" min="0" value="250" style="width:100%"></label><label>Справа, мм<input id="overRight" type="number" min="0" value="250" style="width:100%"></label>
+        <label>Высота груза, мм<input id="overHeight" type="number" min="1" value="4000" style="width:100%"></label>
+      </div><p class="hint" id="oversizeHint">Режим задаёт геометрию погрузки; возможность проезда и разрешение на перевозку не проверяются.</p>
+      <h2>Центр тяжести</h2><select id="cgSection" aria-label="Секция для центра тяжести"></select><label><input id="cgManual" type="checkbox"> Показать целевую метку</label>
+      <label style="display:block;margin-top:8px">Вдоль площадки, мм<input id="cgX" type="range" min="0" max="13600" value="6800" step="10" style="width:100%"><input id="cgXValue" type="number" step="10" style="width:110px"></label>
+      <label style="display:block;margin-top:8px">Поперёк площадки, мм<input id="cgY" type="range" min="0" max="2450" value="1225" step="10" style="width:100%"><input id="cgYValue" type="number" step="10" style="width:110px"></label>
+      <p class="hint" id="cgMode">Рассчитан по весам и положению грузов. Метку можно перетащить мышью.</p>
+      <h2 data-i18n="cargo">Грузовые места</h2>
+      <div style="display:flex;gap:7px">
+        <button id="btnAdd" data-i18n="addRow">+ Позиция</button>
+        <select id="presetSel"></select>
+        <button id="btnImport" data-i18n="importBtn">Импорт Excel/CSV</button>
+        <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden>
+      </div>
+      <table class="cargo">
+        <thead><tr>
+          <th></th><th data-i18n="name">Наименование</th><th data-i18n="length">Д</th>
+          <th data-i18n="width">Ш</th><th data-i18n="height">В</th>
+          <th data-i18n="weightKg">Вес</th><th data-i18n="qty">Кол-во</th>
+          <th data-i18n="tiersCol">Ярусы</th><th data-i18n="rotate">Поворот</th>
+          <th data-i18n="groupCol">Группа</th><th></th>
+        </tr></thead>
+        <tbody id="cargoRows"></tbody>
+      </table>
+      <p class="hint" data-i18n="importHint"></p>
+
+      <div class="btns">
+        <button id="btnCalc" class="primary" data-i18n="calc">Рассчитать погрузку</button>
+        <button id="btnAuto" data-i18n="autoBtn">Расставить заново (авто)</button>
+      </div>
+      <div class="btns">
+        <button id="btnPdf" disabled data-i18n="pdfBtn">Упаковочный лист (PDF)</button>
+        <button id="btnShot" data-i18n="shot">Скриншот сцены</button>
+      </div>
+      <p class="hint" data-i18n="pinnedHint"></p>
+
+      <h2 data-i18n="stats">Результаты</h2>
+      <div id="stats"></div>
+    </div>
+  </div>
+
+  <div id="boxbar">
+    <span class="lbl" id="boxbarLbl"></span>
+<button id="copy-selected">Копировать</button><button id="edit-position">Координаты</button>
+    <button id="bbRotate">⟳ По горизонтали</button><button id="bbRotateVertical">↕ По вертикали</button>
+    <button id="bbUp" data-i18n="tierUp">▲ Ярус выше</button>
+    <button id="bbDown" data-i18n="tierDown">▼ Ярус ниже</button>
+    <button id="bbWhL" data-i18n="toWhL">⇤ На склад слева</button>
+    <button id="bbWhR" data-i18n="toWhR">⇥ На склад справа</button>
+    <button id="bbDel" class="danger" data-i18n="delBox">🗑 Удалить место</button>
+  </div>
+  <div id="overlapBanner" data-i18n="overlapWarn"></div>
+  <div id="dragHint" data-i18n="dragHint"></div>
+  <div id="statsOverlay"></div>
+
+  <div id="noSpace">
+    <div id="noSpaceBox">
+      <h2 data-i18n="noSpaceTitle">Грузовой отсек не выбран</h2>
+      <p data-i18n="noSpaceHint">Выберите отсек в панели слева или откройте каталог</p>
+      <button id="noSpaceStart" class="primary" data-i18n="startBtn">Начать</button>
+    </div>
+  </div>
+
+  <div id="catModal">
+    <div id="catBox">
+      <div id="catHead">
+        <h2 data-i18n="catalogTitle">Каталог грузовых площадей</h2>
+        <input id="catSearch" placeholder="Поиск…">
+        <button id="catClose">✕</button>
+      </div>
+      <div id="catList"></div>
+    </div>
+  </div>
+</main>
+<dialog id="advanced-dialog"><form id="advanced-form"><div class="advanced-head"><h2 id="advanced-title"></h2><button type="button" id="advanced-close">×</button></div><div id="advanced-body"></div><p id="advanced-error" class="warn"></p><div class="advanced-actions"><button type="button" id="advanced-cancel">Закрыть</button><button id="advanced-save" class="primary" type="submit">Сохранить</button></div></form></dialog>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="src/i18n.js"></script>
+<script src="src/tractor-data.js"></script>
+<script src="src/catalog-data.js"></script>
+<script src="src/models.js"></script>
+<script src="src/trailer-data.js"></script>
+<script src="src/cargo-geometry.js"></script>
+<script src="src/packer.js"></script>
+<script src="src/axles.js"></script><script src="src/running-gear.js"></script><script src="src/planner14.js"></script>
+<script src="src/scene.js"></script>
+<script src="src/io.js"></script>
+<script src="src/pdf.js"></script>
+<script src="src/loading-controls.js"></script>
+<script src="src/app.js"></script>
+<script src="src/controls14.js"></script><script src="src/network-plans.js"></script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+const fs=require('fs'),vm=require('vm'),path=require('path'),assert=require('assert');const c=vm.createContext({console});for(const f of ['models.js','cargo-geometry.js','axles.js','running-gear.js','packer.js','planner14.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../src',f),'utf8'),c);
+const n=vm.runInContext(`candidatePlan([{vehicle:vehicleById('tent82')}],[makeCargoItem({name:'EUR',L:1200,W:800,H:1500,weight:500,qty:33})],[],'capacity').placed`,c);assert.equal(n,33);console.log('Standard 13.6 m trailer retains the 33 EUR pallet layout.');

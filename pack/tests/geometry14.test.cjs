@@ -1,0 +1,11 @@
+const assert=require('assert');const g=require('../src/cargo-geometry.js');
+let box={x:0,y:0,z:0,l:1000,w:2000,h:3000,item:{L:1000,W:2000,H:3000,cg:[.2,.3,.4]}};
+assert.deepEqual(g.boxMassCenter(box),[200,600,1200]);
+const original={...box};for(let i=0;i<4;i++)box=g.rotatedCargo(box,'horizontal');assert.deepEqual(g.boxMassCenter(box),g.boxMassCenter(original));
+box=g.rotatedCargo(original,'horizontal');assert.deepEqual(g.boxMassCenter(box),[100,1300,1200]);
+const deck={L:5000,W:2000,H:4000,floorSegments:[{x:0,y:0,l:1000,w:2000,z:500},{x:1000,y:0,l:4000,w:2000,z:0}],blockedRegions:[]};
+let cargo={x:0,y:0,z:500,l:1000,w:1000,h:1000};assert.equal(g.floorSupport(cargo,deck),1);assert.equal(g.floorHeight({...cargo,z:0},deck),500);assert(g.hitsDeckObstacle({...cargo,z:0},deck));
+cargo={x:1000,y:0,z:0,l:1000,w:1000,h:1000};assert.equal(g.floorSupport(cargo,deck),1);
+deck.blockedRegions=[{x:1000,y:0,l:500,w:1000}];assert.equal(g.floorSupport(cargo,deck),.5);assert(g.hitsDeckObstacle(cargo,deck));
+assert.equal(g.rectanglesArea([{x:0,y:0,l:100,w:100},{x:50,y:0,l:100,w:100}]),15000);
+console.log('Cargo CoG rotation, stepped decks, union support and excluded regions passed.');

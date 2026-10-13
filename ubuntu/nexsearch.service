@@ -1,0 +1,27 @@
+[Unit]
+Description=NexSearch 1.4 LAN host
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nexsearch
+Group=nexsearch
+WorkingDirectory=/opt/nexsearch/current
+EnvironmentFile=/etc/nexsearch/host.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/nexsearch/venv/bin/python -m network.server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nexsearch
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

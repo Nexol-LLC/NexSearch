@@ -1,0 +1,10 @@
+[Unit]
+Description=NexSearch daily updates at 10 Moscow
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 Europe/Moscow
+Persistent=true
+Unit=nexsearch-update.service
+
+[Install]
+WantedBy=timers.target

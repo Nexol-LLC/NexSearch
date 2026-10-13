@@ -1,0 +1,13 @@
+[Unit]
+Description=NexSearch signed GitHub updates
+After=network-online.target postgresql.service nexsearch.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/nexsearch
+ExecStart=/opt/nexsearch/venv/bin/python /opt/nexsearch/control/updater.py
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 GIT_TERMINAL_PROMPT=0
+TimeoutStartSec=1800
+UMask=0027

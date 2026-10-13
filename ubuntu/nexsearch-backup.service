@@ -1,0 +1,12 @@
+[Unit]
+Description=NexSearch verified PostgreSQL backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/nexsearch/ubuntu/backup.sh
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nexsearch-backups
