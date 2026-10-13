@@ -3,7 +3,7 @@ from pathlib import Path,PurePosixPath
 from datetime import datetime,timezone
 from uuid import uuid4
 import json,zipfile,hashlib,os,shutil,time
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.serialization import load_pem_public_key,Encoding,PublicFormat
 from cryptography.exceptions import InvalidSignature
 
 class UpdateError(ValueError):pass
@@ -33,7 +33,11 @@ def prepare(archive,program,home,role):
   for name,digest in files.items():
    if not name.startswith(prefix):raise UpdateError('Файл относится к другой программе')
    rel=name[len(prefix):];target=safe_target(folder,rel)
-   if rel=='updates-public.pem' and hashlib.sha256(public.read_bytes()).hexdigest()!=digest:raise UpdateError('Замена доверенного ключа требует отдельной процедуры')
+   if rel=='updates-public.pem':
+    # Git on Windows may use CRLF; compare key material, not PEM whitespace.
+    current_key=load_pem_public_key(public.read_bytes()).public_bytes(Encoding.DER,PublicFormat.SubjectPublicKeyInfo)
+    incoming_key=load_pem_public_key(z.read(name)).public_bytes(Encoding.DER,PublicFormat.SubjectPublicKeyInfo)
+    if current_key!=incoming_key:raise UpdateError('Замена доверенного ключа требует отдельной процедуры')
    entry=z.getinfo(name)
    if (entry.external_attr>>16)&0o170000==0o120000:raise UpdateError('Ссылки в обновлениях Windows не поддерживаются')
    data=z.read(entry)

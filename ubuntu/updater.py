@@ -15,7 +15,8 @@ def read_package(branch,name,destination):
  data=subprocess.check_output(['git','--git-dir',str(CACHE/'repo.git'),'show','refs/remotes/origin/'+branch+':.updates/'+name])
  destination.write_bytes(data);return hashlib.sha256(data).hexdigest()
 def verified(archive,role):
- sys.path.insert(0,str(BASE/'current'))
+ # Bootstrap verifier is installed by the operator and refreshed after a signed deployment.
+ sys.path.insert(0,str(BASE/'control'))
  from network.updates import prepare
  return prepare(archive,Path('/etc/nexsearch'),CACHE,role)
 def healthy():
@@ -58,6 +59,7 @@ def host_install(archive,digest,state):
   run('systemctl','start','nexsearch')
   if not healthy():raise RuntimeError('Updated host did not pass health check')
   shutil.copy2(target/'ubuntu/updater.py',BASE/'control/updater.py');(BASE/'control/updater.py').chmod(0o755)
+  (BASE/'control/network').mkdir(exist_ok=True);(BASE/'control/network/__init__.py').touch();shutil.copy2(target/'network/updates.py',BASE/'control/network/updates.py')
   state['host_installed']={**meta,'installed_at':time.time()};audit('update.host_installed',meta)
  except Exception:
   pending=BASE/'current.new';pending.unlink(missing_ok=True);pending.symlink_to(old);pending.replace(current);run('systemctl','restart','nexsearch');audit('update.host_rollback',meta);raise
