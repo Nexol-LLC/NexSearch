@@ -10,7 +10,7 @@ def build(kind):
  if kind!='Maintenance':command+=['--windowed','--add-data',str(ROOT/'network/web')+';network/web','--add-data',str(ROOT/'network/client-trust.json')+';network','--add-data',str(ROOT/'version.json')+';.','--collect-all','zeroconf']
  command+=['--collect-data','certifi','--exclude-module','pytest','--exclude-module','numpy','--exclude-module','PIL']
  if kind=='HostWindows':
-  for name2,dest in [('network/schema.sql','network'),('network/schema14.sql','network'),('pack','pack'),('timezones.json','.')]:command+=['--add-data',str(ROOT/name2)+';'+dest]
+  for name2,dest in [('network/schema.sql','network'),('network/schema14.sql','network'),('network/data','network/data'),('pack','pack'),('timezones.json','.')]:command+=['--add-data',str(ROOT/name2)+';'+dest]
   for module in ['uvicorn.logging','uvicorn.loops.asyncio','uvicorn.protocols.http.h11_impl','uvicorn.lifespan.on']:command+=['--hidden-import',module]
   for module in ['psycopg_binary','argon2','_argon2_cffi_bindings']:command+=['--collect-all',module]
  command.append(str(ROOT/entry));subprocess.run(command,cwd=ROOT,check=True)
