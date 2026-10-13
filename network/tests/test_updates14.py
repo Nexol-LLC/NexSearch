@@ -28,3 +28,14 @@ def test_signature_role_hash_and_traversal_checked(tmp_path):
  assert not (tmp_path/'outside.txt').exists()
  with zipfile.ZipFile(archive,'a') as z:z.writestr('unapproved.py','print(1)')
  with pytest.raises(UpdateError):prepare(archive,program,tmp_path/'state','EmployeeWindows')
+
+def test_same_public_key_line_endings_are_allowed_and_key_replacement_denied(tmp_path):
+ key=Ed25519PrivateKey.generate();other=Ed25519PrivateKey.generate();program=tmp_path/'program';program.mkdir()
+ original=key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
+ (program/'updates-public.pem').write_bytes(original)
+ for allowed,pem in [(True,original.replace(b'\n',b'\r\n')),(False,other.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))]:
+  name='EmployeeWindows/updates-public.pem';raw=json.dumps({'version':'1.4.1','schema':14,'role':'EmployeeWindows','files':{name:hashlib.sha256(pem).hexdigest()}}).encode();archive=tmp_path/'key.zip'
+  with zipfile.ZipFile(archive,'w') as z:z.writestr('release.json',raw);z.writestr('release.sig',key.sign(raw));z.writestr(name,pem)
+  if allowed:assert prepare(archive,program,tmp_path/'state','EmployeeWindows')['verified']
+  else:
+   with pytest.raises(UpdateError):prepare(archive,program,tmp_path/'state','EmployeeWindows')
