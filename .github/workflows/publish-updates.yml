@@ -27,7 +27,7 @@ jobs:
             python package_update.py EmployeeMac --output .updates/employee-mac.zip --commit "$GITHUB_SHA"
           fi
       - uses: actions/upload-artifact@v4
-        with: {name: signed-source, path: '.updates/*.zip'}
+        with: {name: signed-source, path: '.updates/*.zip', include-hidden-files: true, if-no-files-found: error}
   windows:
     if: github.ref_name == 'employe'
     runs-on: windows-latest
@@ -43,7 +43,7 @@ jobs:
           NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
         run: python package_update.py EmployeeWindows --output .updates/employee-windows.zip --commit $env:GITHUB_SHA
       - uses: actions/upload-artifact@v4
-        with: {name: signed-windows, path: '.updates/*.zip'}
+        with: {name: signed-windows, path: '.updates/*.zip', include-hidden-files: true, if-no-files-found: error}
   publish:
     if: always() && needs.source.result == 'success' && (needs.windows.result == 'success' || needs.windows.result == 'skipped')
     needs: [source, windows]
