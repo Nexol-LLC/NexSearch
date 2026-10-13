@@ -18,16 +18,19 @@ jobs:
         with: {python-version: '3.12'}
       - run: pip install 'cryptography>=43,<47'
       - name: Sign source package
+        id: sign
         env:
           NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
         run: |
           if [ "${GITHUB_REF_NAME}" = host ]; then
             python package_update.py HostUbuntu --output .updates/host-linux.zip --commit "$GITHUB_SHA"
+            echo 'path=.updates/host-linux.zip' >> "$GITHUB_OUTPUT"
           else
             python package_update.py EmployeeMac --output .updates/employee-mac.zip --commit "$GITHUB_SHA"
+            echo 'path=.updates/employee-mac.zip' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/upload-artifact@v4
-        with: {name: signed-source, path: '.updates/*.zip', include-hidden-files: true, if-no-files-found: error}
+        with: {name: signed-source, path: '${{ steps.sign.outputs.path }}', include-hidden-files: true, if-no-files-found: error}
   windows:
     if: github.ref_name == 'employe'
     runs-on: windows-latest
@@ -43,7 +46,7 @@ jobs:
           NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
         run: python package_update.py EmployeeWindows --output .updates/employee-windows.zip --commit $env:GITHUB_SHA
       - uses: actions/upload-artifact@v4
-        with: {name: signed-windows, path: '.updates/*.zip', include-hidden-files: true, if-no-files-found: error}
+        with: {name: signed-windows, path: '.updates/employee-windows.zip', include-hidden-files: true, if-no-files-found: error}
   publish:
     if: always() && needs.source.result == 'success' && (needs.windows.result == 'success' || needs.windows.result == 'skipped')
     needs: [source, windows]
