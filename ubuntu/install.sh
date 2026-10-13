@@ -12,7 +12,7 @@ install -d -m 0700 -o nexsearch -g nexsearch /var/lib/nexsearch /var/lib/nexsear
 install -d -m 0700 -o postgres -g postgres /var/lib/nexsearch-provision /var/lib/nexsearch-backups
 install -d -m 0700 /var/lib/nexsearch-updater
 tar -xzf source.tar.gz -C /opt/nexsearch/releases/initial
-chmod 0700 /opt/nexsearch/releases/initial/network/identity
+install -d -m 0700 /opt/nexsearch/releases/initial/network/identity
 ln -sfn /opt/nexsearch/releases/initial /opt/nexsearch/current
 ln -sfn /opt/nexsearch/current/ubuntu /opt/nexsearch/ubuntu
 ln -sfn /opt/nexsearch/current/network /opt/nexsearch/network
@@ -22,9 +22,13 @@ systemctl enable --now postgresql avahi-daemon
 PYTHONPATH=/opt/nexsearch/current /opt/nexsearch/venv/bin/python - <<'PY'
 from pathlib import Path
 import json,shutil,getpass
-from network.host_secrets import load
+from network.host_secrets import load,save
+from network.tls import identity
 from network.auth import HASHER
 seed=Path('/opt/nexsearch/current/network/identity')
+trust,cert,key=identity(seed)
+Path('/opt/nexsearch/current/network/client-trust.json').write_text(json.dumps(trust))
+if not (seed/'host-secrets.enc').exists():save({},seed/'host-secrets.enc',key)
 data=load(seed/'host-secrets.enc',seed/'host-key.pem')
 password_hash=data.get('bootstrap_admin_hash')
 if not password_hash:password_hash=HASHER.hash(getpass.getpass('Пароль аккаунта host: '))
