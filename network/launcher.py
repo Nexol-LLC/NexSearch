@@ -65,7 +65,10 @@ def admin_session(db,home):
     with db.transaction(admin=True) as conn:
         row=conn.execute("SELECT * FROM employees WHERE is_admin ORDER BY created_at LIMIT 1").fetchone()
         if not row:
-            row=conn.execute("INSERT INTO employees(id,login,first_name,last_name,password_hash,is_admin,role,requested_role) VALUES(%s,'host','Хост','Администратор',%s,true,'director','director') RETURNING *",(uuid4(),HASHER.hash(secrets.token_urlsafe(32)))).fetchone()
+            from . import host_secrets
+            saved_hash=host_secrets.load().get('bootstrap_admin_hash')
+            password_hash=saved_hash if isinstance(saved_hash,str) and saved_hash.startswith('$argon2id$') else HASHER.hash(secrets.token_urlsafe(32))
+            row=conn.execute("INSERT INTO employees(id,login,first_name,last_name,password_hash,is_admin,role,requested_role,approved) VALUES(%s,'host','Хост','Администратор',%s,true,'director','director',true) RETURNING *",(uuid4(),password_hash)).fetchone()
         conn.execute('DELETE FROM sessions WHERE device_id=%s',(device,))
     result=Authentication(db).issue(row,device,'Хост','127.0.0.1')
     local.update(token=result['token'],profile=result['employee']);secure_store.write(home/'admin.sec',local)

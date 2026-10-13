@@ -13,12 +13,12 @@ ROLE="$(cat "$PACKAGE/role.txt")"
 ARCH="$(/usr/bin/uname -m)"
 VERSION="$(/usr/bin/sw_vers -productVersion)"
 MAJOR="${VERSION%%.*}"
-if (( MAJOR < 11 )); then
-  /usr/bin/osascript -e 'display alert "NexSearch v1.1" message "Нужна macOS 11 Big Sur или новее. Для MacBook Pro 2016 подойдёт macOS Monterey."'
+if (( MAJOR < 12 )); then
+  /usr/bin/osascript -e 'display alert "NexSearch 1.4.1" message "Нужна macOS 12 Monterey или новее. Для MacBook Pro 2016 подойдёт macOS Monterey."'
   exit 1
 fi
 if [[ "$ARCH" != "x86_64" && "$ARCH" != "arm64" ]]; then
-  /usr/bin/osascript -e 'display alert "NexSearch v1.1" message "Неизвестный процессор Mac."'
+  /usr/bin/osascript -e 'display alert "NexSearch 1.4.1" message "Неизвестный процессор Mac."'
   exit 1
 fi
 BUILD="$(cat "$PACKAGE/build-id.txt")"
@@ -27,7 +27,7 @@ LOG_DIR="$HOME/Library/Logs/NexSearch"
 /bin/mkdir -p "$RUNTIME" "$LOG_DIR"
 LOG="$LOG_DIR/$ROLE-launch.log"
 exec >>"$LOG" 2>&1
-printf '\nNexSearch v1.1 — %s — %s\n' "$ROLE" "$ARCH"
+printf '\nNexSearch 1.4.1 — %s — %s\n' "$ROLE" "$ARCH"
 MOUNT=""
 LOCK_OWNED=""
 cleanup() {
@@ -38,7 +38,7 @@ finish() {
   local code=$?
   cleanup
   if (( code != 0 )); then
-    /usr/bin/osascript -e 'on run argv' -e 'display alert "NexSearch v1.1" message ("Не удалось запустить программу. Журнал: " & (item 1 of argv))' -e 'end run' "$LOG" || true
+    /usr/bin/osascript -e 'on run argv' -e 'display alert "NexSearch 1.4.1" message ("Не удалось запустить программу. Журнал: " & (item 1 of argv))' -e 'end run' "$LOG" || true
   fi
 }
 trap finish EXIT
@@ -68,7 +68,7 @@ if [[ ! -f "$RUNTIME/ready" ]]; then
       /bin/sleep 1
     done
     if [[ ! -f "$RUNTIME/ready" ]]; then
-      /usr/bin/osascript -e 'display alert "NexSearch v1.1" message "Подготовка первого запуска ещё выполняется. Повторите запуск через минуту."'
+      /usr/bin/osascript -e 'display alert "NexSearch 1.4.1" message "Подготовка первого запуска ещё выполняется. Повторите запуск через минуту."'
       exit 1
     fi
   fi

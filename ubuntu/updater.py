@@ -45,6 +45,9 @@ def host_install(archive,digest,state):
  run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),str(old/'ubuntu/backup_pg.py'))
  target=BASE/'releases'/('github-'+digest[:20])
  if not target.exists():shutil.copytree(stage,target,ignore=shutil.ignore_patterns('release.json','release.sig','update-state.json'))
+ target.chmod(0o755)
+ for entry in target.rglob('*'):entry.chmod(0o755 if entry.is_dir() else 0o644)
+ shutil.rmtree(stage)
  # Dependencies and all privileged migrations come only from signed packages.
  run(str(BASE/'venv/bin/pip'),'install','-r',str(target/'network/requirements.txt'),stdout=subprocess.DEVNULL)
  run('systemctl','stop','nexsearch')
@@ -54,6 +57,7 @@ def host_install(archive,digest,state):
   pending=BASE/'current.new';pending.unlink(missing_ok=True);pending.symlink_to(target);pending.replace(current)
   run('systemctl','start','nexsearch')
   if not healthy():raise RuntimeError('Updated host did not pass health check')
+  shutil.copy2(target/'ubuntu/updater.py',BASE/'control/updater.py');(BASE/'control/updater.py').chmod(0o755)
   state['host_installed']={**meta,'installed_at':time.time()};audit('update.host_installed',meta)
  except Exception:
   pending=BASE/'current.new';pending.unlink(missing_ok=True);pending.symlink_to(old);pending.replace(current);run('systemctl','restart','nexsearch');audit('update.host_rollback',meta);raise

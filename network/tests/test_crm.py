@@ -1,12 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
+import os
 from uuid import uuid4
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import pytest
 from fastapi.testclient import TestClient
 from psycopg.errors import ForeignKeyViolation
-from network.postgres_runtime import start_postgres
+from network.postgres_runtime import start_postgres,stop_postgres
 from network.database import Database,Conflict
 from network.api import create_app
 from network.auth import Authentication,HASHER
@@ -17,11 +18,13 @@ ROOT=Path(__file__).resolve().parents[2]
 def pg():
     home=(ROOT/'network/.runtime/test-host').resolve()
     assert home.is_relative_to((ROOT/'network/.runtime').resolve())
-    dsn=start_postgres(home,ROOT/'network/.runtime/postgres',54344)
+    runtime=Path(os.environ.get('NEXSEARCH_TEST_POSTGRES',ROOT/'network/.runtime/postgres'))
+    dsn=start_postgres(home,runtime,int(os.environ.get('NEXSEARCH_TEST_PORT','54354')))
     database=Database(dsn);database.initialize()
     with database.transaction(admin=True) as conn:conn.execute((ROOT/'network/schema14.sql').read_text(encoding='utf-8'))
     yield database
     database.close()
+    if (home/'postgres-data/postmaster.pid').exists():stop_postgres(home,runtime)
 
 @pytest.fixture
 def db(pg):
