@@ -83,7 +83,7 @@ function vehicleById(id) { return VEHICLE_TEMPLATES.find(v => v.id === id) || nu
    у мультисекционных (автосцепка) — массив sections. */
 function getSections(v) {
   if (v.sections) return v.sections.map((s, i) => ({ ...s, index: i }));
-  return [{ name: v.name || null, L: v.L, W: v.W, H: v.H,
+  return [{ id:v.id, trailer:v.trailer||null, name: v.name || null, L: v.L, W: v.W, H: v.H,
             maxPayload: v.maxPayload, axles: v.axles || null,oversize:v.oversize||null,floorSegments:v.floorSegments||null,blockedRegions:v.blockedRegions||[],runningGear:v.runningGear||null,packingStrategy:v.packingStrategy||'capacity',targetCg:v.targetCg||null,index:0 }];
 }
 

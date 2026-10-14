@@ -13,6 +13,7 @@ let _renderer, _scene, _camera, _canvasEl, _cargoGroup, _vehGroup, _labelGroup;
 let _cgGroup,_cgDrag=null;
 let _axlePos = []; // [{sec, kind:'front'|'rear', x (м), W (м)}] — позиции для подписей нагрузок
 let _orbit = { theta: -Math.PI / 4, phi: Math.PI / 3.2, dist: 18, target: null };
+let _vehicleBounds={minX:0,maxX:14,minY:-1.5,maxY:4,W:2.5};
 let _zones = [];           // [{kind:'sec'|'wh', ... , x0, z0 (м), L, W, H (мм)}]
 let _boxes = [];           // ссылка на массив мест приложения (текущий экран)
 let _colors = [];
@@ -265,40 +266,6 @@ function axleB64() { return typeof AXLE_STL_GZ_B64 !== 'undefined' ? AXLE_STL_GZ
 const TRACTOR_WIDTH = 2.5;         // м — реальная ширина тягача (масштаб модели)
 const TRACTOR_REAR_OVERHANG = 0.9; // м — свес рамы за седлом (fallback-якорь без оси)
 
-/* Сборка тягача: truck_cut + rear_axle (общая система координат модели).
-   Якорь — центр задней оси под седлом (xKingpin); колёса на земле (-1 м);
-   перёд модели (+X) разворачивается в -X сцены.
-   Заглушка (каркасная кабина) удаляется после успешной распаковки. */
-function addTractorModel(xKingpin, W0, placeholder) {
-  loadPackedGeo('tractor', tractorB64(), geoT => {
-    if (!geoT) return;                             // нет данных/поддержки — остаётся каркас
-    loadPackedGeo('axle', axleB64(), geoA => {
-      if (placeholder.parent !== _vehGroup) return; // сцена уже перестроена
-      _vehGroup.remove(placeholder);
-      geoT.computeBoundingBox();
-      const bbT = geoT.boundingBox;
-      const scale = TRACTOR_WIDTH / (bbT.max.z - bbT.min.z);
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(geoT, modelMat()));
-      let tx, minY = bbT.min.y;
-      if (geoA) {
-        geoA.computeBoundingBox();
-        const bbA = geoA.boundingBox;
-        g.add(new THREE.Mesh(geoA, modelMat())); // задняя ось на родном месте
-        tx = xKingpin + scale * (bbA.min.x + bbA.max.x) / 2; // центр оси → под седло
-        minY = Math.min(minY, bbA.min.y);
-      } else {
-        tx = xKingpin + TRACTOR_REAR_OVERHANG + scale * bbT.min.x;
-      }
-      g.rotation.y = Math.PI;
-      g.scale.setScalar(scale);
-      g.position.set(tx, -1.0 - scale * minY, W0 / 2 + scale * (bbT.min.z + bbT.max.z) / 2);
-      _vehGroup.add(g);
-      sceneRender();
-    });
-  });
-}
-
 /* Линейка размеров кузова на земле: вдоль длины (деления по 1 м, подписи
    через 2 м и итоговая длина) и по ширине у заднего края последней секции */
 function addRuler(x0, L, W, isLast) {
@@ -331,80 +298,11 @@ function addRuler(x0, L, W, isLast) {
   }
 }
 
-/* Кабина для обычных грузовиков (Газель, 5-тонник, автосцепка):
-   из модели тягача вырезается блок кабины с передними колёсами
-   (в модели он отделён от рамы, X ≥ CAB_CLIP_X) и масштабируется
-   по ширине кузова. Задний срез кабины — в 0.15 м перед кузовом. */
-const CAB_CLIP_X = 25; // ед. модели: правее — только кабина и передние колёса
-
-function cabGeoFrom(full) {
-  const p = full.getAttribute('position').array;
-  const nm = full.getAttribute('normal').array;
-  const idx = [];
-  for (let i = 0; i < p.length; i += 9) {
-    if ((p[i] + p[i + 3] + p[i + 6]) / 3 >= CAB_CLIP_X) idx.push(i);
-  }
-  const pos = new Float32Array(idx.length * 9);
-  const nor = new Float32Array(idx.length * 9);
-  idx.forEach((s, k) => {
-    pos.set(p.subarray(s, s + 9), k * 9);
-    nor.set(nm.subarray(s, s + 9), k * 9);
-  });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  return g;
-}
-
-function addCabModel(W0, placeholder) {
-  loadPackedGeo('tractor', tractorB64(), geoT => {
-    if (!geoT) return;                              // остаётся каркасная кабина
-    if (!_geoCache.cab || _geoCache.cab === 'fail') _geoCache.cab = cabGeoFrom(geoT);
-    const geo = _geoCache.cab;
-    if (placeholder.parent !== _vehGroup) return;
-    _vehGroup.remove(placeholder);
-    geo.computeBoundingBox();
-    const bb = geo.boundingBox;
-    const scale = (W0 * 0.98) / (bb.max.z - bb.min.z);
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(geo, modelMat()));
-    g.rotation.y = Math.PI;
-    g.scale.setScalar(scale);
-    g.position.set(-0.15 + scale * bb.min.x, -1.0 - scale * bb.min.y,
-                   W0 / 2 + scale * (bb.min.z + bb.max.z) / 2);
-    _vehGroup.add(g);
-    sceneRender();
-  });
-}
-
-/* Оси с колёсами (rear_axle) на местах колёс прицепа/секций.
-   spots: [{x (м, центр оси), W (м, ширина секции)}]; ширина оси = ширине секции.
-   Каркасные колёса-заглушки (ph) удаляются после успешной распаковки. */
-function addAxleModels(spots, ph) {
-  loadPackedGeo('axle', axleB64(), geo => {
-    if (!geo || ph.parent !== _vehGroup) return;
-    _vehGroup.remove(ph);
-    geo.computeBoundingBox();
-    const bb = geo.boundingBox;
-    const cx = (bb.min.x + bb.max.x) / 2;
-    for (const s of spots) {
-      const sc = s.W / (bb.max.z - bb.min.z);
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(geo, modelMat()));
-      g.rotation.y = Math.PI;
-      g.scale.setScalar(sc);
-      g.position.set(s.x + sc * cx, -1.0 - sc * bb.min.y,
-                     s.W / 2 + sc * (bb.min.z + bb.max.z) / 2);
-      _vehGroup.add(g);
-    }
-    sceneRender();
-  });
-}
-
 /* ---------- Построение статики: транспорт + склады ---------- */
 
 function sceneBuild(vehicle, truckIdx) {
   if(_cgGroup)_cgGroup.clear();
+  _vehGroup.traverse(o=>{o.geometry?.dispose();if(o.material){for(const m of Array.isArray(o.material)?o.material:[o.material]){m.map?.dispose();m.dispose()}}});
   _vehGroup.clear();
   _labelGroup.clear();
   _zones = [];
@@ -412,51 +310,46 @@ function sceneBuild(vehicle, truckIdx) {
   // vehicle может быть null (все отсеки удалены) — рисуются только склады
   const sections = vehicle ? getSections(vehicle) : [];
   let offset = 0, maxW = 0, maxH = 0;
-  const wheelPh = new THREE.Group(); // каркасные колёса секций — заглушка до модели оси
-  const axleSpots = [];              // точки установки rear_axle
-
-  const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.32, 14);
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x37474f });
-  const addWheelPair = (x, W, parent = _vehGroup) => {
-    for (const zc of [W * 0.16, W * 0.84]) {
-      const wh = new THREE.LineSegments(new THREE.EdgesGeometry(wheelGeo, 10), lineMat);
-      wh.rotation.x = Math.PI / 2;
-      wh.position.set(x, -0.5, zc);
-      parent.add(wh);
+  let minX=0,maxX=0;
+  const tireMat=new THREE.MeshPhongMaterial({color:0x25313d,shininess:8});
+  const rimMat=new THREE.MeshPhongMaterial({color:0xb8c5d2,shininess:55});
+  const chassisMat=new THREE.MeshLambertMaterial({color:0x576779});
+  const addPart=(parent,l,h,w,x,y,z,mat)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(l,h,w),mat);mesh.position.set(x,y,z);parent.add(mesh);return mesh};
+  const addAxle=(axis,W,x0)=>{
+    const group=new THREE.Group();group.name='axle:'+axis.code;group.userData={axle:axis};
+    const x=x0+axis.x/1000,r=axis.radius/1000,y=axis.centerY/1000;
+    const track=Math.min(W,2.5),mid=W/2,tw=.24;
+    const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,track-.32,12),chassisMat);
+    shaft.rotation.x=Math.PI/2;shaft.position.set(x,y,mid);group.add(shaft);
+    for(const side of [-1,1]){
+      const z=mid+side*(track/2-tw/2-.035);
+      const wheel=new THREE.Mesh(new THREE.CylinderGeometry(r,r,tw,32),tireMat);
+      wheel.name='tire';wheel.rotation.x=Math.PI/2;wheel.position.set(x,y,z);group.add(wheel);
+      const rim=new THREE.Mesh(new THREE.CylinderGeometry(r*.6,r*.6,tw+.008,24),rimMat);
+      rim.rotation.x=Math.PI/2;rim.position.copy(wheel.position);group.add(rim);
+      const hub=new THREE.Mesh(new THREE.CylinderGeometry(r*.2,r*.2,tw+.025,16),chassisMat);
+      hub.rotation.x=Math.PI/2;hub.position.copy(wheel.position);group.add(hub);
     }
+    _vehGroup.add(group);
+    minX=Math.min(minX,x-r);maxX=Math.max(maxX,x+r);
   };
-
-  // кабина у автомашин; у седельных тягачей (передняя опора = седло, front >= 0)
-  // каркас-заглушка заменяется 3D-моделью тягача
-  let seatTractor = false;
-  if (vehicle && vehicle.group === 'truck' && sections.length) {
-    const s0 = sections[0];
-    const W0 = s0.W / 1000, H0 = s0.H / 1000;
-    const gap = 0.3, cabL = 2.0, cabW = W0 * 0.94;
-    const cabH = Math.min(H0 * 0.97, 3.1);
-    const xr = -gap, xf = -gap - cabL;
-    const p = new THREE.Shape();
-    p.moveTo(xr, 0.25);
-    p.lineTo(xr, cabH);
-    p.lineTo(xf + 0.45, cabH);
-    p.lineTo(xf + 0.12, cabH * 0.62);
-    p.lineTo(xf, cabH * 0.45);
-    p.lineTo(xf, 0.25);
-    p.lineTo(xr, 0.25);
-    const cabGeo = new THREE.ExtrudeGeometry(p, { depth: cabW, bevelEnabled: false });
-    const cab = new THREE.LineSegments(new THREE.EdgesGeometry(cabGeo, 10), lineMat);
-    cab.position.z = (W0 - cabW) / 2;
-    // заглушка: каркасная кабина + колёса; у седельных тягачей заменяется 3D-моделью
-    seatTractor = !!(s0.axles && s0.axles.front >= 0);
-    const ph = new THREE.Group();
-    ph.add(cab);
-    const ax0 = s0.axles && s0.axles.front < 0 ? s0.axles.front / 1000 : (xr + xf) / 2;
-    addWheelPair(ax0, W0, ph);
-    if (seatTractor) addWheelPair(s0.axles.front / 1000, W0, ph);
-    _vehGroup.add(ph);
-    if (seatTractor) addTractorModel(s0.axles.front / 1000, W0, ph);
-    else addCabModel(W0, ph); // обычные грузовики — кабина из модели
-  }
+  // The old STL contained its own axles. A wheel-free cab/chassis now uses
+  // the same explicit axle layout as the labels and calculation profile.
+  const addCab=(layout,W,x0)=>{
+    const front=layout.axles.find(a=>a.kind==='tractor-front'||a.kind==='rigid-front');if(!front)return;
+    const rear=layout.axles.filter(a=>a.kind==='tractor-rear');
+    const x=x0+front.x/1000,ground=layout.groundY/1000;
+    const cab=new THREE.Group();cab.name='cab-without-embedded-wheels';
+    const cabW=Math.min(W*.95,2.4),base=front.wheelTop/1000+.08,h=2.1;
+    addPart(cab,2.05,h,cabW,x-.03,base+h/2,W/2,new THREE.MeshPhongMaterial({color:0xd4dce8,shininess:24}));
+    const glass=new THREE.MeshLambertMaterial({color:0x647e98});
+    addPart(cab,.015,.72,cabW*.86,x-1.06,base+1.35,W/2,glass);
+    for(const z of [W/2-cabW/2-.009,W/2+cabW/2+.009])addPart(cab,1.13,.72,.015,x-.2,base+1.35,z,glass);
+    addPart(cab,.12,.16,cabW*.98,x-1.1,base+.1,W/2,chassisMat);
+    const end=rear.length?x0+Math.max(...rear.map(a=>a.x))/1000+.65:x+.85;
+    addPart(cab,Math.max(.5,end-x),.18,.8,(x+end)/2,ground+.63,W/2,chassisMat);
+    _vehGroup.add(cab);minX=Math.min(minX,x-1.2);
+  };
 
   for (const s of sections) {
     const L = s.L / 1000, W = s.W / 1000, H = s.H / 1000;
@@ -466,8 +359,8 @@ function sceneBuild(vehicle, truckIdx) {
     if(bounds.oversize){const frame=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry((bounds.maxX-bounds.minX)/1000,bounds.H/1000,(bounds.maxY-bounds.minY)/1000)),new THREE.LineBasicMaterial({color:0xc58b46,transparent:true,opacity:.5}));frame.position.set(offset+(bounds.minX+bounds.maxX)/2000,bounds.H/2000,(bounds.minY+bounds.maxY)/2000);_vehGroup.add(frame)}
 
     for(const deck of floorSegments(s)){
-      const slab=new THREE.Mesh(new THREE.BoxGeometry(deck.l/1000,Math.max(.02,(deck.z||0)/1000),deck.w/1000),new THREE.MeshLambertMaterial({color:(deck.z||0)>0?0x7970a0:0x8a929e}));
-      slab.position.set(offset+(deck.x+deck.l/2)/1000,(deck.z||0)/2000-.01,(deck.y+deck.w/2)/1000);_vehGroup.add(slab);
+      const slab=new THREE.Mesh(new THREE.BoxGeometry(deck.l/1000,.04,deck.w/1000),new THREE.MeshLambertMaterial({color:(deck.z||0)>0?0x7970a0:0x8a929e}));
+      slab.position.set(offset+(deck.x+deck.l/2)/1000,(deck.z||0)/1000-.02,(deck.y+deck.w/2)/1000);_vehGroup.add(slab);
     }
     for(const blocked of s.blockedRegions||[]){const shape=new THREE.Mesh(new THREE.BoxGeometry(blocked.l/1000,.05,blocked.w/1000),new THREE.MeshBasicMaterial({color:0xc06371,transparent:true,opacity:.55}));shape.position.set(offset+(blocked.x+blocked.l/2)/1000,.03,(blocked.y+blocked.w/2)/1000);_vehGroup.add(shape)}
     const frame = new THREE.LineSegments(
@@ -479,48 +372,47 @@ function sceneBuild(vehicle, truckIdx) {
       new THREE.MeshBasicMaterial({ color: 0x2c3e50, transparent: true, opacity: 0.12, side: THREE.DoubleSide }));
     wall.rotation.y = Math.PI / 2;
     wall.position.set(offset, H / 2, W / 2);
-    if(!bounds.oversize)_vehGroup.add(wall);
+    if(!bounds.oversize&&vehicle.body!=='flatbed')_vehGroup.add(wall);
 
     if (vehicle.group === 'truck') {
-      const axleXs = [];
-      const gear=s.runningGear;const defined=gear?.kind==='rigid'?[...(gear.front||[]),...(gear.rear||[])].filter(a=>finiteNumber(a.x)):gear?.kind==='semitrailer'?[...(gear.trailerAxles||[]).filter(a=>finiteNumber(a.x)),...[...(gear.tractorFront||[]),...(gear.tractorRear||[])].filter(a=>finiteNumber(a.x)&&finiteNumber(gear.fifthWheelX)&&finiteNumber(gear.kingpinX)).map(a=>({...a,x:a.x-gear.fifthWheelX+gear.kingpinX}))]:[];
-      const nAx = (isFinite(s.maxPayload) && s.maxPayload > 15000) ? (L > 10 ? 3 : 2) : 1;
-      if(defined.length){axleXs.push(...defined.map(a=>a.x/1000));}
-      else if (s.axles) {
-        // колёса под седлом первой секции рисует заглушка/модель тягача
-        if (s.axles.front >= 0 && !(s.index === 0 && seatTractor))
-          axleXs.push(s.axles.front / 1000);
-        for (let i = 0; i < nAx; i++)
-          axleXs.push(s.axles.rear / 1000 + (i - (nAx - 1) / 2) * 1.31);
-      } else {
-        // позиция осей неизвестна (каталог/свой размер) — задняя ось на 2/3 длины
-        for (let i = 0; i < nAx; i++)
-          axleXs.push(L * 2 / 3 + (i - (nAx - 1) / 2) * 1.31);
+      const layout=sectionAxleLayout(s);_zones[_zones.length-1].axleLayout=layout;
+      for(const axis of layout.axles)addAxle(axis,W,offset);
+      if(s.index===0)addCab(layout,W,offset);
+      for(const module of layout.modules){
+        const top=module.z/1000;
+        addPart(_vehGroup,module.l/1000,.08,W,offset+(module.x+module.l/2)/1000,top-.04,W/2,chassisMat);
+        addPart(_vehGroup,module.l/1000,.16,W*.32,offset+(module.x+module.l/2)/1000,top-.16,W/2,chassisMat);
+        minX=Math.min(minX,offset+module.x/1000);maxX=Math.max(maxX,offset+(module.x+module.l)/1000);
+        const front=module.x<0,edge=front?(module.x+module.l)/1000:module.x/1000;
+        const floorEdge=front?0:L;
+        const transition=new THREE.Shape();transition.moveTo(floorEdge,-.04);transition.lineTo(floorEdge,0);transition.lineTo(edge,top);transition.lineTo(edge,top-.08);transition.closePath();
+        const ramp=new THREE.Mesh(new THREE.ExtrudeGeometry(transition,{depth:W*.32,bevelEnabled:false}),chassisMat);ramp.position.set(offset,0,W*.34);_vehGroup.add(ramp);
       }
-      for (const ax of axleXs) {
-        addWheelPair(offset + ax, W, wheelPh);
-        axleSpots.push({ x: offset + ax, W });
+      if(layout.modules.length){const rear=layout.axles.filter(a=>a.kind==='tractor-rear').at(-1);if(rear){const x=rear.x/1000-.5,end=layout.modules[0].x/1000;addPart(_vehGroup,end-x,.12,W*.32,offset+(x+end)/2,.74,W/2,chassisMat)}}
+      // Flatbed neck joins the loading deck to the tractor outside usable cargo space.
+      if(s.trailer&&layout.kind==='semitrailer'&&!layout.modules.length){
+        const drawing=trailerDrawingLayout(s.id,s.L),kingpin=s.runningGear?.kingpinX??drawing?.kingpinX;
+        if(Number.isFinite(kingpin)&&kingpin<0){
+          const neckL=-kingpin/1000+.4,top=.55;
+          addPart(_vehGroup,neckL,.08,W*.92,offset-neckL/2,top-.04,W/2,chassisMat);
+          addPart(_vehGroup,.16,top+.08,W*.32,offset-.08,top/2-.04,W/2,chassisMat);
+          const bottom=layout.groundY/1000+.72;
+          addPart(_vehGroup,.55,top-bottom,.6,offset+kingpin/1000,(top+bottom)/2,W/2,chassisMat);
+          minX=Math.min(minX,offset-neckL);
+        }
       }
-    }
-    // позиции подписей осевых нагрузок (значения задаёт sceneSetAxleLoads)
-    if (s.axles) {
-      _axlePos.push({ sec: s.index, kind: 'front', x: offset + s.axles.front / 1000, W });
-      _axlePos.push({ sec: s.index, kind: 'rear', x: offset + s.axles.rear / 1000, W });
+      addPart(_vehGroup,L,.08,Math.min(W*.32,.85),offset+L/2,-.1,W/2,chassisMat);
     }
     // ворота сзади секции; у последней правая створка приоткрыта;
     // у бортового кузова — единый борт, откинутый вниз
     const isLast = s === sections[sections.length - 1];
-    addDoors(offset + L, W, H, isLast, vehicle.body === 'flatbed');
+    if(!s.trailer)addDoors(offset + L, W, H, isLast, vehicle.body === 'flatbed');
     // линейка размеров кузова
     addRuler(offset, L, W, isLast);
 
     offset += L + SECTION_GAP;
   }
   const totalL = Math.max(0.1, offset - SECTION_GAP);
-
-  // колёса секций: каркас-заглушка, заменяется моделями осей rear_axle
-  _vehGroup.add(wheelPh);
-  if (vehicle && vehicle.group === 'truck' && axleSpots.length) addAxleModels(axleSpots, wheelPh);
 
   // склады слева (z<0) и справа (z>W) — пунктирные зоны на земле
   const whL = Math.max(totalL, 8); // м
@@ -547,8 +439,10 @@ function sceneBuild(vehicle, truckIdx) {
     _vehGroup.add(label);
   }
 
-  _orbit.target = new THREE.Vector3(totalL / 2, maxH / 3, maxW / 2);
-  _orbit.dist = Math.max(totalL, maxW + 2 * (WH_GAP + WH_DEPTH / 1000), maxH) * 1.35 + 2;
+  maxX=Math.max(maxX,totalL);
+  _vehicleBounds={minX,maxX,minY:Math.min(-1.5,...sections.map(s=>-(s.trailer?.loadingHeight||1250)/1000-.9)),maxY:maxH,W:maxW};
+  _orbit.target = new THREE.Vector3((minX+maxX)/2, maxH/3, maxW/2);
+  _orbit.dist = Math.max(maxX-minX, maxW + 2 * (WH_GAP + WH_DEPTH / 1000), maxH) * 1.35 + 2;
   sceneRender();
 }
 

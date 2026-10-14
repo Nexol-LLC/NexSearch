@@ -36,7 +36,9 @@ function grossAxleLoads(vehicle,stats){
   // Tractor x coordinates have their own datum; visualization maps it to the trailer datum.
   for(const a of axles)if(a.kind.startsWith('tractor'))a.sceneX=a.x-g.fifthWheelX+g.kingpinX;
  }
- return {available:true,axles,kingpinKg,unstable:(g.kind==='semitrailer'&&(reaction.front<0||reaction.rear<0))||axles.some(a=>a.unstable),
+ return {available:true,axles,kingpinKg:g.emptyCoupled?null:kingpinKg,kingpinDeltaKg:g.emptyCoupled?kingpinKg:null,
+         couplingLoadKnown:g.kind==='semitrailer'?!g.emptyCoupled:null,
+         unstable:(g.kind==='semitrailer'&&!g.emptyCoupled&&(reaction.front<0||reaction.rear<0))||axles.some(a=>a.unstable),
          grossKg:axles.reduce((s,a)=>s+a.kg,0),method:g.emptyCoupled?'Измеренные нагрузки пустого автопоезда плюс реакции от груза':'Статическая модель двух опор; нагрузка внутри группы распределяется по указанным долям',assumption:g.distributionSource||'Доли нагрузки заданы пользователем'};
 }
 if(typeof module!=='undefined')module.exports={gearErrors,groupPosition,supportReactions,grossAxleLoads};

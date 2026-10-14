@@ -1,9 +1,9 @@
 /* Dimensions of usable lower decks, not the overall vehicle length.
    Source: Техника ооо негабаритика 06.pdf, pages 2–9. Heights are loading heights. */
 const TRAILER_SPECS=[
- ['jumba4','Юмба · 4 оси',45000,12000,2500,900,16000,24000,2],
- ['megajumba4','Мега-Юмба · 4 оси',45000,12000,2500,900,16000,24000,3],
- ['mega4','Мега · 4 оси',45000,12000,2500,1100,16000,24000,4],
+ ['jumba4','Юмба · 4 оси',45000,11130,2500,900,16000,24000,2],
+ ['megajumba4','Мега-Юмба · 4 оси',45000,10899,2500,900,16000,24000,3],
+ ['mega4','Мега · 4 оси',45000,11560,2500,1100,16000,24000,4],
  ['lowbed5','Трал · 5 осей',65000,11800,2500,900,16000,24000,5],
  ['lowbed7','Трал · 7 осей',95000,10650,2500,950,16000,24000,6],
  ['beam','Балковоз',65000,15875,2500,1560,16000,35000,7],
@@ -12,7 +12,7 @@ const TRAILER_SPECS=[
 ];
 for(const [id,name,maxPayload,L,W,loadingHeight,overallMin,overallMax,page] of TRAILER_SPECS){
  const v={id:'pdf-'+id,group:'truck',body:'flatbed',name:{ru:name,en:name},L,W,H:4000,maxPayload,axles:null,
-  trailer:{loadingHeight,overallMin,overallMax,maxW:id==='beam'||id==='blade'?2500:3000,page,
+  trailer:{loadingHeight,overallMin,overallMax,maxW:id==='beam'||id==='blade'?2500:3000,page,axleCount:trailerDrawingLayout('pdf-'+id,L).xs.length,
    note:id==='modular'?'Нижняя площадка 5 + 4 м; модули выше площадки.':id==='lowbed7'?'Грузоподъёмность 95 т по подробному листу; на обзорном листе указано 102 т.':'Прямоугольник нижней площадки. Гусак и уступы не включены.'}};
  VEHICLE_TEMPLATES.push(v);
  VEHICLE_CATALOG.push({name:'Трал · '+name,cls:'Негабарит / трал',gp:maxPayload,L,W,H:4000,vol:null,templateId:v.id});
