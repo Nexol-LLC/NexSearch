@@ -156,7 +156,7 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
                     self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Cache-Control','no-store');self.end_headers()
                     for line in response.iter_lines(chunk_size=1):
                         self.wfile.write(line+b'\n');self.wfile.flush()
-            except (requests.RequestException,BrokenPipeError,ConnectionResetError):pass
+            except (requests.RequestException,BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass
         def mutation(self):
             if not self.valid() or self.headers.get('Origin') not in (f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}') or not secrets.compare_digest(self.headers.get('X-Nexol-CSRF',''),agent.csrf):return self.send({'error':'Запрос отклонён'},403)
             try:

@@ -272,7 +272,7 @@ function addCargoRow(data) {
     <td><input class="c-l num noarrow" type="number" value="${data.L || ''}"></td>
     <td><input class="c-w num noarrow" type="number" value="${data.W || ''}"></td>
     <td><input class="c-h num noarrow" type="number" value="${data.H || ''}"></td>
-    <td><input class="c-wt num noarrow" type="number" value="${data.weight || ''}"></td>
+    <td><input class="c-wt num noarrow" type="number" value="${data.weight != null ? data.weight : ''}"></td>
     <td><input class="c-q num" type="number" value="${data.qty != null ? data.qty : 1}" min="0"></td>
     <td><input class="c-tiers tiers" type="number" value="${data.tiers || 1}" min="1" max="10"></td>
     <td><input class="c-rot" type="checkbox" ${data.rotatable === false ? '' : 'checked'}></td>

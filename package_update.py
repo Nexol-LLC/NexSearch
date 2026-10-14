@@ -20,7 +20,7 @@ def package(role,output,key,commit):
   for p,name in source_files():files[name]=p.read_bytes()
   files['client-trust.json']=(ROOT/'network/client-trust.json').read_bytes()
  else:raise ValueError(role)
- metadata={'version':version,'source_commit':commit,'role':role,'schema':14}
+ metadata={'version':version,'source_commit':commit,'role':role,'schema':15}
  files['package-info.json']=json.dumps(metadata,indent=2).encode()
  manifest={**metadata,'files':{role+'/'+name:hashlib.sha256(data).hexdigest() for name,data in sorted(files.items())}}
  raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)

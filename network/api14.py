@@ -63,6 +63,7 @@ class Task(Input):
 class FleetVehicle(Input):
  name:str=Field(min_length=1,max_length=200);kind:str=Field(pattern='^('+ '|'.join(VEHICLES)+')$')
  length_mm:float=Field(gt=0,le=100000);width_mm:float=Field(gt=0,le=20000);height_mm:float=Field(gt=0,le=20000);payload_kg:float=Field(gt=0,le=500000)
+ weight_kg:float|None=Field(default=None,ge=0,le=500000);volume_m3:float|None=Field(default=None,gt=0,le=10000);location:str=Field(default='',max_length=300)
  notes:str=Field(default='',max_length=2000)
 class Fleet(Input):vehicles:list[FleetVehicle]=Field(max_length=100);regions:str=Field(default='',max_length=3000);revision:int=Field(ge=0)
 class Feedback(Input):carrier_id:UUID;order_id:UUID|None=None;rating:int=Field(ge=1,le=5);description:str=Field(min_length=1,max_length=5000)
@@ -242,7 +243,17 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
   return {'tasks':pending,'upcoming_loadings':loading,'orders':counts,'time_zone':'Europe/Moscow','server_time':now}
  @app.put('/api/carriers/{ident}/fleet')
  def fleet(ident:UUID,body:Fleet,user=Depends(employee)):
-  with db.transaction(user['id']) as conn:row=conn.execute('UPDATE carriers SET vehicles=%s,regions=%s,revision=revision+1,updated_by=%s,updated_at=now() WHERE id=%s AND revision=%s RETURNING *',(Jsonb([v.model_dump() for v in body.vehicles]),body.regions,user['id'],ident,body.revision)).fetchone()
+  with db.transaction(user['id']) as conn:
+   current=conn.execute('SELECT vehicles,revision FROM carriers WHERE id=%s FOR UPDATE',(ident,)).fetchone()
+   if not current or current['revision']!=body.revision:raise Conflict('Перевозчик недоступен или уже изменён')
+   vehicles=[]
+   for index,v in enumerate(body.vehicles):
+    value=v.model_dump();old=current['vehicles'][index] if index<len(current['vehicles']) else {}
+    if old.get('name')==v.name and old.get('kind')==v.kind:
+     for key in ('weight_kg','volume_m3','location'):
+      if key not in v.model_fields_set and key in old:value[key]=old[key]
+    vehicles.append(value)
+   row=conn.execute('UPDATE carriers SET vehicles=%s,regions=%s,revision=revision+1,updated_by=%s,updated_at=now() WHERE id=%s AND revision=%s RETURNING *',(Jsonb(vehicles),body.regions,user['id'],ident,body.revision)).fetchone()
   if not row:raise Conflict('Перевозчик недоступен или уже изменён')
   audit(user,'carrier.fleet',ident,body.model_dump());return row
  @app.post('/api/carriers/feedback')
