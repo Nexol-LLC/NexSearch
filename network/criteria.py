@@ -23,6 +23,7 @@ class Criteria(BaseModel):
  region:str=Field(default='',max_length=150)
  keywords:str=Field(default='',max_length=200)
  require_contacts:bool=False
+ company_count:int=Field(default=10,ge=1,le=50)
  report_year:int|None=Field(default=None,ge=2011,le=2100)
  @field_validator('sectors')
  @classmethod

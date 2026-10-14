@@ -29,9 +29,12 @@ class Database:
     def initialize(self):
         with self.transaction(admin=True) as db:
             ready=db.execute("SELECT to_regclass('public.schema_meta') AS ready").fetchone()['ready']
-            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=14').fetchone():return
+            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=15').fetchone():return
+            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=14').fetchone():
+                db.execute(Path(__file__).with_name('schema15.sql').read_text(encoding='utf-8'));return
             db.execute(Path(__file__).with_name('schema.sql').read_text(encoding='utf-8'))
             db.execute(Path(__file__).with_name('schema14.sql').read_text(encoding='utf-8'))
+            db.execute(Path(__file__).with_name('schema15.sql').read_text(encoding='utf-8'))
 
     def audit(self,employee,kind,entity='',details=None,ip=''):
         import json
@@ -82,8 +85,8 @@ class Database:
             assigned=False
             allowed=True
             if job:
-                current=db.execute('SELECT target,added FROM jobs WHERE id=%s FOR UPDATE',(job,)).fetchone()
-                allowed=current['target'] is None or current['added']<current['target']
+                current=db.execute('SELECT target,added,stop_requested,status FROM jobs WHERE id=%s FOR UPDATE',(job,)).fetchone()
+                allowed=not current['stop_requested'] and current['status']=='running' and (current['target'] is None or current['added']<current['target'])
             if employee and allowed and item.get('verification',{}).get('active') and inn and len(inn)==10:
                 assigned=bool(db.execute("INSERT INTO employee_leads(company_id,employee_id,status,job_id) VALUES(%s,%s,%s,%s) ON CONFLICT(company_id) DO NOTHING RETURNING company_id",(ident,employee,'processing' if processing else 'new',job)).fetchone())
             if job and allowed and (assigned if employee else is_new):db.execute('UPDATE jobs SET added=added+1 WHERE id=%s',(job,))
@@ -93,6 +96,11 @@ class Database:
         from .criteria import matches,sql_filter
         filters,args=sql_filter(criteria)
         with self.transaction(admin=True) as db:
+            if job:
+                current=db.execute('SELECT target,added,stop_requested,status FROM jobs WHERE id=%s FOR UPDATE',(job,)).fetchone()
+                if not current or current['stop_requested'] or current['status'] not in ('queued','running'):return []
+                if current['target'] is not None:limit=min(limit,max(0,current['target']-current['added']))
+            if limit<=0:return []
             rows=db.execute("SELECT c.id,c.payload FROM companies c WHERE c.state='ready' AND c.active_verified AND c.inn IS NOT NULL AND c.verified_at>now()-interval '24 hours' AND NOT EXISTS(SELECT 1 FROM employee_leads l WHERE l.company_id=c.id)"+filters+" ORDER BY c.created_at LIMIT %s FOR UPDATE OF c SKIP LOCKED",(*args,limit)).fetchall()
             claimed=[]
             for row in rows:

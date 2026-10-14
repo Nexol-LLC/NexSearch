@@ -247,7 +247,11 @@ class Http:
         host = parts.hostname
         interval=max(self.config['request_delay_seconds'],self.delays.get(host,0))
         delay = interval - (time.monotonic() - self.last.get(host, 0))
-        if delay > 0: time.sleep(delay)
+        if delay > 0:
+            if self.config.get('cancellable'):
+                from network.cancellation import wait
+                wait(delay)
+            else: time.sleep(delay)
         try:
             r = self.session.request(method, url, timeout=self.config['timeout_seconds'], allow_redirects=False, **kwargs)
         finally:

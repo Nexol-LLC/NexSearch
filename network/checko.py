@@ -31,23 +31,41 @@ def normalize(company,finances,inn):
   'checko_company':data}
 
 class Checko:
- def __init__(self,db):self.db=db;self.gate=threading.Lock();self.last=0.;self.metadata={};self.inn_locks=[threading.Lock() for _ in range(64)]
+ def __init__(self,db):self.db=db;self.gate=threading.Lock();self.last=0.;self.metadata={};self.inn_locks=[threading.Lock() for _ in range(64)];self.slots=threading.BoundedSemaphore(4);self.unavailable_until=0.;self.unavailable_reason=''
+ def failure(self):return self.unavailable_reason if time.monotonic()<self.unavailable_until else ''
+ def unavailable(self,reason,seconds=30):
+  self.unavailable_reason=reason;self.unavailable_until=time.monotonic()+seconds
+  return VerificationUnavailable(reason)
  def key(self):return os.environ.get('CHECKO_API_KEY') or host_secrets.load().get('checko_api_key','')
  def request(self,method,inn):
   key=self.key()
   if not key:raise VerificationUnavailable('На хосте не настроен API-ключ Чекко')
-  with self.gate:
-   time.sleep(max(0,.35-(time.monotonic()-self.last)));self.last=time.monotonic()
-   try:r=requests.get('https://api.checko.ru/v2/'+method,params={'key':key,'inn':inn},timeout=(5,18))
-   except requests.RequestException:raise VerificationUnavailable('Чекко временно недоступен') from None
-   if r.status_code!=200:raise VerificationUnavailable('Чекко: HTTP '+str(r.status_code))
+  if self.failure():raise VerificationUnavailable(self.failure())
+  from .cancellation import check,wait
+  while not self.slots.acquire(timeout=.1):check()
+  try:
+   while not self.gate.acquire(timeout=.1):check()
+   try:
+    wait(max(0,.35-(time.monotonic()-self.last)));check();self.last=time.monotonic()
+   finally:self.gate.release()
+   # Pace request starts; never hold the global gate while waiting for the network.
+   try:r=requests.get('https://api.checko.ru/v2/'+method,params={'key':key,'inn':inn},timeout=(3,8))
+   except requests.RequestException:raise self.unavailable('Чекко временно недоступен') from None
+   check()
    try:answer=r.json()
-   except ValueError:raise VerificationUnavailable('Чекко вернул нечитаемый ответ') from None
+   except ValueError:raise self.unavailable('Чекко: HTTP '+str(r.status_code)+' · нечитаемый ответ') from None
    meta=answer.get('meta') or {};self.metadata={k:meta.get(k) for k in ('today_request_count','balance')}
-   if meta.get('status')!='ok':raise VerificationUnavailable(str(meta.get('message','Запрос Чекко отклонён')).replace(key,'[ключ скрыт]')[:300])
+   if r.status_code!=200 or meta.get('status')!='ok':
+    reason=str(meta.get('message') or 'Чекко: HTTP '+str(r.status_code)).replace(key,'[ключ скрыт]')[:300]
+    raise self.unavailable(reason,600 if r.status_code in (401,403,429) else 30)
    return answer
+  finally:self.slots.release()
  def verify(self,inn,force=False):
-  with self.inn_locks[hash(inn)%64]:return self._verify(inn,force)
+  from .cancellation import check
+  lock=self.inn_locks[hash(inn)%64]
+  while not lock.acquire(timeout=.1):check()
+  try:check();return self._verify(inn,force)
+  finally:lock.release()
  def _verify(self,inn,force=False):
   if not valid_inn(inn) or len(inn)!=10:raise VerificationUnavailable('Нужен корректный ИНН организации')
   with self.db.transaction(admin=True) as db:

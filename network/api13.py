@@ -13,7 +13,7 @@ from psycopg.errors import UniqueViolation
 from .database import Database,Conflict,NotFound
 from .version import VERSION
 from .auth import Authentication
-from .search14 import SearchWorker
+from .search15 import SearchWorker
 from .criteria import Criteria,DIVISIONS,SEGMENTS
 from .checko import Checko,VerificationUnavailable
 from . import host_secrets
@@ -27,13 +27,14 @@ class Register(Input):
  device_id:str=Field(min_length=1,max_length=128);computer_name:str=Field(default='',max_length=128)
 class Login(Input):
  login:str=Field(min_length=1,max_length=64);password:str=Field(min_length=1,max_length=256);device_id:str=Field(min_length=1,max_length=128);computer_name:str=Field(default='',max_length=128)
-class Search(Input):target:int|None=10;criteria:Criteria=Field(default_factory=Criteria)
+class Search(Input):target:int=Field(default=10,ge=1,le=50);criteria:Criteria=Field(default_factory=Criteria)
 class Lead(Input):status:str=Field(pattern=r'^(new|processing|refused|taken)$');called:bool;call_note:str=Field(default='',max_length=10000);revision:int=Field(ge=0)
 class Stage(Input):stage:str=Field(max_length=500);revision:int=Field(ge=0)
 class StageList(Input):stages:list[str]=Field(max_length=40)
 class Route(Input):
  origin:str=Field(default='',max_length=200);destination:str=Field(default='',max_length=200);cargo:str=Field(default='',max_length=500);weight_kg:float|None=Field(default=None,ge=0,le=1_000_000);revision:int=Field(ge=0)
 class Carrier(Input):
+ phone:str=Field(default='',max_length=200);email:str=Field(default='',max_length=300);work_terms:str=Field(default='',max_length=5000);vat_mode:str=Field(default='unknown',pattern='^(unknown|included|without)$');vat_rate:float|None=Field(default=None,ge=0,le=100)
  name:str=Field(min_length=1,max_length=500);contacts:str=Field(default='',max_length=5000);routes:str=Field(default='',max_length=5000);description:str=Field(default='',max_length=10000);revision:int|None=None
 class Plan(Input):name:str=Field(min_length=1,max_length=200);project:dict;revision:int|None=None
 class Active(Input):active:bool
@@ -41,7 +42,7 @@ class Role(Input):role:str=Field(pattern=r'^(logist|manager|director)$')
 class Legacy(Input):companies:list[dict]=Field(max_length=200)
 class Setting(Input):checko_api_key:str|None=Field(default=None,max_length=200)
 class Activity(Input):
- kind:str=Field(pattern=r'^(view\.(search|clients|carriers|pack|team|history|rates|maps)|company\.view|external\.(calculator|signl|yandex|2gis|scales)|route\.use|session\.exit|view\.(today|orders|tasks)|order\.view)$')
+ kind:str=Field(pattern=r'^(view\.(search|clients|carriers|pack|team|history|rates|maps|tools|vat)|company\.view|external\.(calculator|signl|yandex|2gis|scales|cargo|tracking|clock|optimus)|route\.use|session\.exit|view\.(today|orders|tasks)|order\.view)$')
  entity:str=Field(default='',max_length=100);details:dict=Field(default_factory=dict)
 class Quote(Input):
  origin:str=Field(min_length=1,max_length=200);destination:str=Field(min_length=1,max_length=200);vehicle:str=Field(default='',max_length=200)
@@ -178,7 +179,6 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
   audit(user,'search.criteria','',body.model_dump());return {'criteria':body.model_dump()}
  @app.post('/api/search')
  def search(body:Search,user=Depends(employee)):
-  if body.target not in (10,None):raise ValueError('Объём: 10 или все новые')
   try:
    with db.transaction(user['id']) as conn:row=conn.execute('INSERT INTO jobs(id,employee_id,target,criteria,message) VALUES(%s,%s,%s,%s,%s) RETURNING *',(uuid4(),user['id'],body.target,Jsonb(body.criteria.model_dump()),'В очереди хоста')).fetchone()
   except UniqueViolation:raise Conflict('Ваш поиск уже выполняется')
@@ -186,9 +186,10 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
  @app.post('/api/search/{ident}/stop')
  def stop(ident:UUID,user=Depends(employee)):
   with db.transaction(user['id']) as conn:
-   row=conn.execute("UPDATE jobs SET stop_requested=true WHERE id=%s AND employee_id=%s AND status IN ('queued','running') RETURNING status",(ident,user['id'])).fetchone()
+   row=conn.execute("UPDATE jobs SET stop_requested=true,status='stopped',finished_at=now(),message='Поиск остановлен; найденные компании сохранены' WHERE id=%s AND employee_id=%s AND status IN ('queued','running') RETURNING status",(ident,user['id'])).fetchone()
    if not row:raise NotFound('Нет активного поиска')
    if row['status']=='queued':conn.execute("UPDATE jobs SET status='stopped',finished_at=now() WHERE id=%s",(ident,))
+  worker.cancel(ident)
   audit(user,'search.stop',ident);return {'ok':True}
  @app.get('/api/company/{ident}/financial')
  def financial(ident:UUID,user=Depends(employee)):
@@ -201,7 +202,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
   with db.transaction(user['id']) as conn:return {'carriers':conn.execute("SELECT c.*,e.first_name||' '||e.last_name AS author FROM carriers c JOIN employees e ON e.id=c.created_by ORDER BY c.updated_at DESC").fetchall()}
  @app.post('/api/carriers')
  def add_carrier(body:Carrier,user=Depends(employee)):
-  with db.transaction(user['id']) as conn:row=conn.execute('INSERT INTO carriers(id,name,contacts,routes,description,created_by,updated_by) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING *',(uuid4(),body.name.strip(),body.contacts,body.routes,body.description,user['id'],user['id'])).fetchone()
+  with db.transaction(user['id']) as conn:row=conn.execute('INSERT INTO carriers(id,name,contacts,routes,description,phone,email,work_terms,vat_mode,vat_rate,created_by,updated_by) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *',(uuid4(),body.name.strip(),body.contacts,body.routes,body.description,body.phone,body.email,body.work_terms,body.vat_mode,body.vat_rate,user['id'],user['id'])).fetchone()
   audit(user,'carrier.create',row['id'],body.model_dump(exclude={'revision'}));return row
  @app.patch('/api/carriers/{ident}')
  def edit_carrier(ident:UUID,body:Carrier,user=Depends(employee)):
@@ -209,7 +210,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
    old=conn.execute('SELECT * FROM carriers WHERE id=%s FOR UPDATE',(ident,)).fetchone()
    if not old:raise NotFound('Перевозчик не найден')
    if old['revision']!=body.revision:raise Conflict('Перевозчик изменён другим сотрудником')
-   row=conn.execute('UPDATE carriers SET name=%s,contacts=%s,routes=%s,description=%s,updated_by=%s,revision=revision+1,updated_at=now() WHERE id=%s RETURNING *',(body.name.strip(),body.contacts,body.routes,body.description,user['id'],ident)).fetchone()
+   row=conn.execute('UPDATE carriers SET name=%s,contacts=%s,routes=%s,description=%s,phone=%s,email=%s,work_terms=%s,vat_mode=%s,vat_rate=%s,updated_by=%s,revision=revision+1,updated_at=now() WHERE id=%s RETURNING *',(body.name.strip(),body.contacts,body.routes,body.description,*[getattr(body,k) if k in body.model_fields_set else old[k] for k in ('phone','email','work_terms','vat_mode','vat_rate')],user['id'],ident)).fetchone()
   audit(user,'carrier.update',ident,body.model_dump(exclude={'revision'}));return row
  @app.get('/api/plans')
  def plans(user=Depends(employee)):
@@ -307,7 +308,8 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
   audit(user,'data.import','',{'added':added,'skipped':skipped});return {'added':added,'skipped':skipped}
  @app.get('/api/export/{kind}')
  def export(kind:str,user=Depends(employee)):
-  if kind=='carriers':items=carriers(user)['carriers'];headers=['Наименование','Контакты','Маршруты','Описание'];rows=[[r[k] for k in ('name','contacts','routes','description')] for r in items]
+  if kind=='carriers':
+   items=carriers(user)['carriers'];headers=['Наименование','Телефон','Почта','Условия работы','НДС','Ставка НДС, %','Другие контакты','Маршруты','Описание','Регионы работы'];rows=[[r['name'],r['phone'],r['email'],r['work_terms'],{'included':'НДС включён','without':'Без НДС','unknown':'Не уточнён'}.get(r['vat_mode'],r['vat_mode']),float(r['vat_rate']) if r['vat_rate'] is not None else None,r['contacts'],r['routes'],r['description'],r['regions']] for r in items]
   elif kind in ('leads','clients'):
    items=leads(user)['companies'] if kind=='leads' else clients(user=user)['companies'];headers=['Наименование','ИНН','Регион','Телефоны','Почта','Сайт','Источник','Юр. статус','Статус работы','Звонок','Этап','Откуда','Куда','Год отчёта','Выручка, ₽','Прибыль, ₽','Капитал, ₽','Транспортный налог, ₽','Год налога','Адрес','ОГРН','КПП','Проверка','Сегмент'];rows=[]
    for r in items:
@@ -318,6 +320,13 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
    sheet=book.add_worksheet('База');fmt=book.add_format({'bold':True,'bg_color':'#37316b','font_color':'white','text_wrap':True});sheet.write_row(0,0,headers,fmt);sheet.set_column(0,len(headers)-1,28);sheet.freeze_panes(1,1)
    for n,row in enumerate(rows,1):sheet.write_row(n,0,row)
    sheet.autofilter(0,0,len(rows),len(headers)-1)
+   if kind=='carriers':
+    fleet=book.add_worksheet('Автомобили');fleet.write_row(0,0,['Перевозчик','Автомобиль','Тип','Где находится','Вес машины, кг','Грузоподъёмность, кг','Объём, м³','Длина, мм','Ширина, мм','Высота, мм','Примечание'],fmt);fleet.set_column(0,10,25);fleet.freeze_panes(1,1);n=0
+    from .api14 import VEHICLES
+    for carrier in items:
+     for v in carrier['vehicles']:
+      n+=1;fleet.write_row(n,0,[carrier['name'],v['name'],VEHICLES.get(v['kind'],v['kind']),v.get('location',''),v.get('weight_kg'),v['payload_kg'],v.get('volume_m3') or v['length_mm']*v['width_mm']*v['height_mm']/1e9,v['length_mm'],v['width_mm'],v['height_mm'],v.get('notes','')])
+    fleet.autofilter(0,0,n,10)
   audit(user,'data.export',kind,{'rows':len(rows)});return Response(stream.getvalue(),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename={kind}.xlsx'})
  base=Path(web or Path(__file__).with_name('web'))
  if pack:app.mount('/pack',StaticFiles(directory=pack,html=True),name='pack')

@@ -14,9 +14,10 @@ from source_catalog import SOURCES
 from fns_registry import search as registry_search,company as registry_company,BASE
 from .checko import Checko,VerificationUnavailable
 from .criteria import matches
+from .cancellation import SearchCancelled
 
 LOG=logging.getLogger('nexol.search')
-CONFIG=dict(request_delay_seconds=.5,timeout_seconds=12)
+CONFIG=dict(request_delay_seconds=.5,timeout_seconds=(3,8),cancellable=True)
 
 class SearchWorker:
     def __init__(self,db,checker=None):
@@ -174,6 +175,8 @@ class SearchWorker:
                 db.execute("UPDATE employee_leads SET status='new',updated_at=now() WHERE company_id=%s AND status='processing' AND revision=0",(company,))
                 if not(assigned if owner else is_new):db.execute('UPDATE jobs SET duplicates=duplicates+1 WHERE id=%s',(ident,))
             self.db.audit(owner,'search.company',company,{'name':item['name'],'inn':item['inn'],'source':item['source']})
+        except SearchCancelled:
+            return
         except VerificationUnavailable as ex:
             self.reject(ident,'Проверка недоступна')
             with self.db.transaction(admin=True) as db:db.execute("UPDATE scraper_candidates SET state='failed',error=%s WHERE url=%s",(str(ex)[:300],card['url']))

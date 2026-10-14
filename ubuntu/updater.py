@@ -38,11 +38,12 @@ def healthy():
 def host_install(archive,digest,state):
  prepared=verified(archive,'HostUbuntu');stage=Path(prepared['state_file']).parent;meta=json.loads((stage/'package-info.json').read_text())
  state['host_available']=meta;current=BASE/'current';old=current.resolve()
- if (old/'package-info.json').is_file() and json.loads((old/'package-info.json').read_text()).get('source_commit')==meta['source_commit']:return
+ if (old/'package-info.json').is_file() and json.loads((old/'package-info.json').read_text()).get('source_commit')==meta['source_commit']:
+  shutil.rmtree(stage);state.pop('host_deferred',None);return
  # Never migrate an active search mid-run; Persistent timer retries on next check.
  code="import psycopg; c=psycopg.connect('dbname=nexsearch'); print(c.execute(\"SELECT count(*) FROM jobs WHERE status IN ('queued','running')\").fetchone()[0])"
  count=int(subprocess.check_output(['runuser','-u','postgres','--',str(BASE/'venv/bin/python'),'-c',code],text=True))
- if count:state['host_deferred']='Есть активные поиски';return
+ if count:state['host_deferred']='Есть активные поиски';shutil.rmtree(stage);return
  run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),str(old/'ubuntu/backup_pg.py'))
  target=BASE/'releases'/('github-'+digest[:20])
  if not target.exists():shutil.copytree(stage,target,ignore=shutil.ignore_patterns('release.json','release.sig','update-state.json'))
@@ -53,14 +54,14 @@ def host_install(archive,digest,state):
  run(str(BASE/'venv/bin/pip'),'install','-r',str(target/'network/requirements.txt'),stdout=subprocess.DEVNULL)
  run('systemctl','stop','nexsearch')
  try:
-  migration="import psycopg,sys; from pathlib import Path; c=psycopg.connect('dbname=nexsearch'); c.execute('SET ROLE nexsearch_owner'); c.execute(\"SELECT set_config('nexol.is_admin','true',true)\"); c.execute(Path(sys.argv[1]).read_text()); c.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO nexsearch_app'); c.execute('GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO nexsearch_app'); c.execute('REVOKE UPDATE,DELETE ON audit_events,call_records FROM nexsearch_app'); c.commit()"
-  run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),'-c',migration,str(target/'network/schema14.sql'))
+  migration="import psycopg,sys; from pathlib import Path; c=psycopg.connect('dbname=nexsearch'); c.execute('SET ROLE nexsearch_owner'); c.execute(\"SELECT set_config('nexol.is_admin','true',true)\"); [c.execute(Path(p).read_text()) for p in sys.argv[1:]]; c.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO nexsearch_app'); c.execute('GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO nexsearch_app'); c.execute('REVOKE UPDATE,DELETE ON audit_events,call_records FROM nexsearch_app'); c.commit()"
+  run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),'-c',migration,str(target/'network/schema14.sql'),str(target/'network/schema15.sql'))
   pending=BASE/'current.new';pending.unlink(missing_ok=True);pending.symlink_to(target);pending.replace(current)
   run('systemctl','start','nexsearch')
   if not healthy():raise RuntimeError('Updated host did not pass health check')
   shutil.copy2(target/'ubuntu/updater.py',BASE/'control/updater.py');(BASE/'control/updater.py').chmod(0o755)
   (BASE/'control/network').mkdir(exist_ok=True);(BASE/'control/network/__init__.py').touch();shutil.copy2(target/'network/updates.py',BASE/'control/network/updates.py')
-  state['host_installed']={**meta,'installed_at':time.time()};audit('update.host_installed',meta)
+  state.pop('host_deferred',None);state['host_installed']={**meta,'installed_at':time.time()};audit('update.host_installed',meta)
  except Exception:
   pending=BASE/'current.new';pending.unlink(missing_ok=True);pending.symlink_to(old);pending.replace(current);run('systemctl','restart','nexsearch');audit('update.host_rollback',meta);raise
 def main():
