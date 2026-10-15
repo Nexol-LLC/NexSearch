@@ -32,6 +32,24 @@ class CarrierSave(Carrier):
   if v and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',v.strip()):raise ValueError('Проверьте почту')
   return v.strip()
 
+class CompanyContacts(Input):
+ phones:list[str]=Field(default_factory=list,max_length=20)
+ emails:list[str]=Field(default_factory=list,max_length=20)
+ revision:int=Field(ge=0)
+ @field_validator('phones','emails')
+ @classmethod
+ def contacts(cls,values,info):
+  import re
+  result=[]
+  for value in values:
+   value=value.strip()
+   if not value:continue
+   if len(value)>200 or any(ord(char)<32 for char in value):raise ValueError('Контакт слишком длинный или содержит недопустимые символы')
+   if info.field_name=='emails' and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',value):raise ValueError('Проверьте адрес почты')
+   if info.field_name=='phones' and not 7<=len(re.sub(r'\D','',value))<=20:raise ValueError('Проверьте номер телефона')
+   if value not in result:result.append(value)
+  return result
+
 def create_app(*args,**kwargs):
  app=base_app(*args,**kwargs);db=app.state.db;auth=app.state.auth
  def employee(request:Request):
@@ -39,6 +57,19 @@ def create_app(*args,**kwargs):
   try:
    request.state.user=auth.authenticate(token[7:] if token.startswith('Bearer ') else '',request.client.host);return request.state.user
   except PermissionError as error:raise HTTPException(401,str(error))
+ @app.patch('/api/leads/{ident}/contacts')
+ def save_company_contacts(ident:UUID,body:CompanyContacts,request:Request,user=Depends(employee)):
+  with db.transaction(user['id']) as c:
+   row=c.execute('SELECT co.payload FROM companies co JOIN employee_leads l ON l.company_id=co.id WHERE co.id=%s AND l.employee_id=%s FOR UPDATE OF co',(ident,user['id'])).fetchone()
+   if not row:raise HTTPException(404,'Компания недоступна')
+   payload=row['payload'];old=payload.get('contact_overrides') or {}
+   if old.get('revision',0)!=body.revision:raise HTTPException(409,'Контакты изменены в другом окне. Откройте карточку заново.')
+   before={key:old.get(key,payload.get(key) or []) for key in ('phones','emails')}
+   updated={'phones':body.phones,'emails':body.emails,'revision':body.revision+1,'updated_at':datetime.now(timezone.utc).isoformat()}
+   c.execute("UPDATE companies SET payload=jsonb_set(payload,'{contact_overrides}',%s,true),updated_at=now() WHERE id=%s",(Jsonb(updated),ident))
+   c.execute("INSERT INTO audit_events(employee_id,kind,entity_id,details,ip) VALUES(%s,'company.contacts',%s,%s,%s)",(user['id'],str(ident),Jsonb({'before':before,'after':updated}),request.client.host))
+  db.events.publish(user['id'],'company.contacts',user.get('role',''),user.get('department','main'))
+  return {'phones':body.phones,'emails':body.emails,'contacts_revision':updated['revision']}
  @app.post('/api/vat')
  def vat(body:VAT,user=Depends(employee)):return calculate(body.amount,body.rate,body.mode)
  @app.post('/api/carriers/save')
