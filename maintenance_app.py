@@ -19,7 +19,11 @@ def main():
    result=prepare(args.archive,args.program,args.home,args.role) if args.action=='prepare' else apply(args.state) if args.action=='apply' else rollback(args.folder)
    if args.action=='apply' and args.home:
     from network.daily_updates import record_applied
-    record_applied(args.home)
+    record_applied(args.home,args.state)
   print(json.dumps(result,ensure_ascii=False),flush=True)
- except Exception as e:print(json.dumps({'error':str(e)},ensure_ascii=False),flush=True);raise SystemExit(1)
+ except Exception as e:
+  if args.action=='apply' and args.home:
+   from network.daily_updates import record_apply_error
+   record_apply_error(args.home,e)
+  print(json.dumps({'error':str(e)},ensure_ascii=False),flush=True);raise SystemExit(1)
 if __name__=='__main__':main()

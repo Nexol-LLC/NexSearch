@@ -130,8 +130,10 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
             if path=='/api/events':return self.stream_events()
             if path=='/api/connection':return self.send(dict(host_found=bool(agent.url),host_url=agent.url,csrf=agent.csrf,profile=agent.state.get('profile'),computer=agent.state['computer_name']))
             if path=='/api/client/update/status':
-                from .daily_updates import read_state
-                return self.send(read_state(agent.home))
+                from .daily_updates import local_status
+                updater=getattr(agent,'updater',None)
+                program=updater.program if updater else Path(resources).parent.parent
+                return self.send(local_status(program,agent.home))
             # The login screen is local so an absent host never produces a blank page.
             base=Path(resources)
             if path=='/':return self.send((base/'index.html').read_bytes(),headers={'Content-Type':'text/html; charset=utf-8'})
