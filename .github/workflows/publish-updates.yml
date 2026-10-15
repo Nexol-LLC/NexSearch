@@ -59,7 +59,23 @@ jobs:
         run: |
           git config user.name 'NexSearch Builds'
           git config user.email 'nexsearch-builds@users.noreply.github.com'
-          git add .updates
-          git commit -m "Publish signed updates for ${GITHUB_SHA}" || exit 0
-          git pull --rebase origin "$GITHUB_REF_NAME"
-          git push origin "HEAD:$GITHUB_REF_NAME"
+          # Another build may have published ZIPs since this checkout began.
+          # Keep verified outputs aside, then commit onto the current branch tip.
+          staged=$(mktemp -d)
+          cp .updates/*.zip "$staged/"
+          git restore .updates
+          for attempt in 1 2 3; do
+            git fetch origin "$GITHUB_REF_NAME"
+            git checkout -B signed-updates "origin/$GITHUB_REF_NAME"
+            if ! git diff --quiet "$GITHUB_SHA" HEAD -- . ':!.updates'; then
+              echo 'A newer source revision exists; its build will publish updates.'
+              exit 0
+            fi
+            cp "$staged/"*.zip .updates/
+            git add .updates
+            git diff --cached --quiet && exit 0
+            git commit -m "Publish signed updates for ${GITHUB_SHA}"
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then exit 0; fi
+          done
+          echo 'The branch kept changing while publishing updates.' >&2
+          exit 1
