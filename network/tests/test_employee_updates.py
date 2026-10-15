@@ -113,3 +113,29 @@ def test_failed_install_is_visible_and_keeps_pending(setup):
     result=updater.read_state(s.home)
     assert result['phase']=='error' and result['last_error']=='PermissionError'
     assert result['pending_state']==state['pending_state']
+
+
+def test_old_host_package_cannot_replace_a_newer_installed_version(setup):
+    s=setup
+    (s.program/'package-info.json').write_text(json.dumps({'version':'1.5.2','source_commit':'future'}))
+    assert check(s)['phase']=='waiting'
+    assert not any(u.endswith('/package') for u in s.calls)
+
+
+def test_old_build_of_same_version_cannot_undo_corrected_manual_install(setup):
+    s=setup
+    (s.program/'package-info.json').write_text(json.dumps({'version':'1.5.1','source_commit':'corrected','built_at':200}))
+    state=check(s);assert state['phase']=='waiting';assert 'pending_state' not in state
+    assert state['rejected_sha256']==s.info['sha256']
+    check(s);assert len([u for u in s.calls if u.endswith('/package')])==1
+    assert updater.older_package({'version':'1.5.1','built_at':200},{'version':'1.5.1','built_at':100})
+    assert not updater.older_package({'version':'1.5.1','built_at':200},{'version':'1.5.1','built_at':300})
+
+
+def test_exit_does_not_apply_legacy_pending_after_newer_manual_install(setup,monkeypatch):
+    s=setup;state=check(s);assert state['pending_state']
+    (s.program/'package-info.json').write_text(json.dumps({'version':'1.5.1','source_commit':'corrected','built_at':200}))
+    monkeypatch.delenv('NEXSEARCH_NO_INSTALL',raising=False)
+    monkeypatch.setattr(updater.subprocess,'Popen',lambda *a,**k:pytest.fail('Old pending package launched'))
+    updater.apply_pending_on_exit(s.program,s.home)
+    assert 'pending_state' not in updater.read_state(s.home)
