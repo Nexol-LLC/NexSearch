@@ -3,3 +3,14 @@
 .fleet-table{min-width:0}.sidebar nav{overflow-y:auto;min-height:0;scrollbar-width:thin}.sidebar .sidebar-bottom{flex-shrink:0}
 
 .carrier-title{white-space:normal;overflow-wrap:anywhere;max-width:100%}.vat-inputs{align-content:start}.vat-inputs label{display:grid;gap:8px}.vat-inputs input,.vat-inputs select{width:100%}.vat-results strong .copy-value{font:inherit;color:inherit;padding:0}.session-actions{flex-wrap:wrap;gap:4px;justify-content:flex-start}.service-layout15 #pack-frame{border:0;border-radius:0}
+
+/* Keep company fields readable, including long addresses and email addresses. */
+#editor-body > .detail{grid-template-columns:125px minmax(0,1fr)}
+.detail > div{min-width:0}
+.detail .copy-value{max-width:100%;white-space:normal;overflow-wrap:anywhere;vertical-align:top}
+.detail .copy-value > span{flex-shrink:0}
+@media(max-width:560px){
+  #editor-body > .detail{grid-template-columns:minmax(0,1fr);gap:5px}
+  #editor form{padding:20px}
+  #editor .dialog-head h2{overflow-wrap:anywhere}
+}
