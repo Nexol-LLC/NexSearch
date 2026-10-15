@@ -2,6 +2,8 @@
 from pathlib import Path
 from datetime import datetime,timezone,timedelta
 import os,sys,json,threading,time,hashlib,subprocess,shutil,xml.etree.ElementTree as ET
+from contextlib import contextmanager
+from uuid import uuid4
 from . import secure_store
 from .version import VERSION
 MOSCOW=timezone(timedelta(hours=3))
@@ -11,43 +13,100 @@ def read_state(home):
  try:return json.loads(state_path(home).read_text(encoding='utf-8'))
  except (OSError,ValueError):return {}
 def write_state(home,state):
- path=state_path(home);path.parent.mkdir(parents=True,exist_ok=True);temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8');temp.replace(path)
+ path=state_path(home);path.parent.mkdir(parents=True,exist_ok=True);temp=path.with_name('daily-'+uuid4().hex+'.tmp');temp.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8');temp.replace(path)
+
+@contextmanager
+def update_lock(home):
+ """Serialize the scheduled helper and the running client, including downloads."""
+ path=Path(home)/'updates/check.lock';path.parent.mkdir(parents=True,exist_ok=True)
+ with path.open('a+b') as file:
+  file.seek(0);file.write(b'0');file.flush();file.seek(0)
+  try:
+   if sys.platform=='win32':
+    import msvcrt
+    msvcrt.locking(file.fileno(),msvcrt.LK_NBLCK,1)
+   else:
+    import fcntl
+    fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  except OSError:yield False;return
+  try:yield True
+  finally:
+   file.seek(0)
+   if sys.platform=='win32':msvcrt.locking(file.fileno(),msvcrt.LK_UNLCK,1)
+   else:fcntl.flock(file,fcntl.LOCK_UN)
+
+def local_status(program,home):
+ state=read_state(home)
+ try:installed=json.loads((Path(program)/'package-info.json').read_text(encoding='utf-8'))
+ except (OSError,ValueError):installed={}
+ state.update(installed_version=installed.get('version',VERSION),installed_commit=installed.get('source_commit'))
+ with update_lock(home) as free:state['checking']=not free
+ return state
 def role():return 'EmployeeMac' if sys.platform=='darwin' else 'EmployeeWindows'
 def check_update(program,home,trust,agent=None,force=False):
+ with update_lock(home) as free:
+  if not free:return read_state(home)
+  return _check_update(program,home,trust,agent,force)
+
+def _check_update(program,home,trust,agent=None,force=False):
  from .client import PinnedAdapter
  import requests
  home=Path(home);program=Path(program);state=read_state(home);now=clock()
- if not force and (now.hour<10 or state.get('date')==now.date().isoformat()):return state
+ if not force:
+  if now.hour<10 or state.get('date')==now.date().isoformat():return state
+  try:
+   if now<datetime.fromisoformat(state['retry_at']):return state
+  except (KeyError,ValueError,TypeError):pass
  if agent:
   with agent.lock:url=agent.url;token=agent.state.get('token')
   session=agent.session
  else:
   profile=secure_store.read(home/'employee.sec',{});url=profile.get('host_url');token=profile.get('token');session=requests.Session();session.trust_env=False;session.mount('https://',PinnedAdapter(trust['fingerprint']))
- if not token or not url:return state
- state.update(checked_at=now.isoformat(),message='Проверяем ветку employe',branch='employe');write_state(home,state)
+ if not token or not url:
+  state.update(phase='waiting',message='Для проверки обновления требуется подключение к хосту и вход');write_state(home,state);return state
+ state.pop('last_error',None)
+ state.update(checked_at=now.isoformat(),phase='checking',message='Проверяем пакет сотрудника на хосте',branch='employe',retry_at=(now+timedelta(minutes=5)).isoformat());write_state(home,state)
  try:
   headers={'Authorization':'Bearer '+token};response=session.get(url+'/api/update/info',params={'platform':role()},headers=headers,timeout=30);response.raise_for_status();info=response.json()
-  if not info.get('available'):state.update(message='Новый комплект ещё не опубликован');write_state(home,state);return state
+  state['host_checked_at']=info.get('checked_at')
+  # At 10:00 the client can reach the host before its GitHub check finishes.
+  # A stale cache must not suppress every further attempt for the whole day.
+  try:host_fresh=datetime.fromisoformat(info['checked_at']).astimezone(MOSCOW)>=now.replace(hour=10,minute=0,second=0,microsecond=0)
+  except (KeyError,ValueError,TypeError):host_fresh=False
+  if host_fresh:state['date']=now.date().isoformat()
+  else:state.pop('date',None)
+  if not info.get('available'):state.update(phase='waiting',message='Хост ещё не подготовил пакет сотрудника; повторим проверку через 5 минут');state.pop('date',None);write_state(home,state);return state
   state.update(version=info['version'],source_commit=info['source_commit'])
   try:installed=json.loads((program/'package-info.json').read_text())
   except (OSError,ValueError):installed={}
-  if state.get('downloaded_sha256')==info['sha256'] or state.get('installed_commit')==info['source_commit'] or installed.get('source_commit')==info['source_commit']:
-   state.update(date=now.date().isoformat(),message='Актуальная версия; обновлений нет');write_state(home,state);return state
-  archive=home/'updates'/('employee-'+info['sha256']+'.zip');temporary=archive.with_suffix('.part');digest=hashlib.sha256();size=0
-  with session.get(url+'/api/update/package',params={'platform':role(),'sha256':info['sha256']},headers=headers,stream=True,timeout=(10,120)) as download:
-   download.raise_for_status()
-   with temporary.open('wb') as file:
-    for chunk in download.iter_content(1024*1024):
-     if not chunk:continue
-     size+=len(chunk)
-     if size>256*1024*1024:raise ValueError('Комплект слишком большой')
-     digest.update(chunk);file.write(chunk)
-  if size!=info['size_bytes'] or digest.hexdigest()!=info['sha256']:raise ValueError('Контрольная сумма комплекта не совпала')
-  temporary.replace(archive)
+  if installed.get('source_commit')==info['source_commit']:
+   state.update(phase='current',message='Установлена актуальная сборка' if host_fresh else 'Установлена сборка из кеша хоста; ждём сегодняшней проверки хоста')
+   state.pop('pending_state',None);state.pop('pending_commit',None);write_state(home,state);return state
+  if state.get('pending_commit')==info['source_commit'] and Path(state.get('pending_state') or '').is_file():
+   state.update(phase='ready',message='Обновление готово. Полностью закройте программу и откройте её после установки');write_state(home,state);return state
+  if not isinstance(info['sha256'],str) or len(info['sha256'])!=64 or any(c not in '0123456789abcdef' for c in info['sha256']):raise ValueError('Некорректная контрольная сумма пакета')
+  archive=home/'updates'/('employee-'+info['sha256']+'.zip');temporary=archive.with_suffix('.part')
+  cached=archive.is_file() and archive.stat().st_size==info['size_bytes'] and hashlib.sha256(archive.read_bytes()).hexdigest()==info['sha256']
+  if not cached:
+   digest=hashlib.sha256();size=0
+   state.update(phase='downloading',downloaded_bytes=0,total_bytes=info['size_bytes'],message='Скачиваем обновление с хоста');write_state(home,state)
+   with session.get(url+'/api/update/package',params={'platform':role(),'sha256':info['sha256']},headers=headers,stream=True,timeout=(10,120)) as download:
+    download.raise_for_status()
+    with temporary.open('wb') as file:
+     for chunk in download.iter_content(1024*1024):
+      if not chunk:continue
+      size+=len(chunk)
+      if size>256*1024*1024:raise ValueError('Комплект слишком большой')
+      digest.update(chunk);file.write(chunk)
+      state['downloaded_bytes']=size;write_state(home,state)
+   if size!=info['size_bytes'] or digest.hexdigest()!=info['sha256']:raise ValueError('Контрольная сумма комплекта не совпала')
+   temporary.replace(archive)
+  state.update(phase='verifying',message='Проверяем подпись и готовим установку');write_state(home,state)
   from .updates import prepare
   prepared=prepare(archive,program,home,role())
-  state.update(date=now.date().isoformat(),downloaded_sha256=info['sha256'],pending_state=prepared['state_file'],pending_commit=info['source_commit'],message='Обновление проверено; установится при закрытии программы')
- except Exception as error:state['message']='Проверка не завершена: '+type(error).__name__;state['last_error']=type(error).__name__
+  state.update(phase='ready',downloaded_sha256=info['sha256'],pending_state=prepared['state_file'],pending_commit=info['source_commit'],message='Обновление готово. Полностью закройте программу и откройте её после установки')
+ except Exception as error:
+  state.pop('date',None);state.update(phase='error',message='Не удалось подготовить обновление. Повторите проверку; при повторной ошибке передайте код администратору',last_error=type(error).__name__)
  write_state(home,state);return state
 class DailyUpdater:
  def __init__(self,agent,program):
@@ -88,8 +147,23 @@ def apply_pending_on_exit(program,home):
   subprocess.Popen([str(runner),'apply','--state',pending,'--home',str(home)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW|subprocess.DETACHED_PROCESS)
  elif sys.platform=='darwin':
   subprocess.Popen([sys.executable,'-m','network.daily_updates','--apply',pending,'--home',str(home),'--wait-pid',str(os.getpid())],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-def record_applied(home):
- state=read_state(home);state['installed_commit']=state.get('pending_commit');state.pop('pending_state',None);state['message']='Обновление установлено';write_state(home,state)
+def record_applied(home,state_file):
+ # Read the package actually applied, rather than a mutable newer pending value.
+ prepared=json.loads(Path(state_file).read_text(encoding='utf-8'))
+ manifest=json.loads((Path(prepared['stage'])/'release.json').read_text(encoding='utf-8'))
+ state=read_state(home);state['installed_commit']=manifest.get('source_commit')
+ pending_is_older=False
+ if state.get('pending_state') and state.get('pending_state')!=str(state_file):
+  try:
+   pending=json.loads(Path(state['pending_state']).read_text(encoding='utf-8'))
+   pending_is_older=datetime.fromisoformat(pending['verified_at'])<=datetime.fromisoformat(prepared['verified_at'])
+  except (OSError,ValueError,KeyError,TypeError):pending_is_older=not Path(state['pending_state']).is_file()
+ if state.get('pending_state')==str(state_file) or state.get('pending_commit')==manifest.get('source_commit') or pending_is_older or not state.get('pending_state'):
+  state.pop('pending_state',None);state.pop('pending_commit',None);state.update(phase='installed',message='Обновление установлено')
+ write_state(home,state)
+
+def record_apply_error(home,error):
+ state=read_state(home);state.update(phase='error',last_error=type(error).__name__,message='Установка не завершена. Полностью закройте программу и повторите установку');write_state(home,state)
 def main():
  import argparse
  parser=argparse.ArgumentParser();parser.add_argument('--program');parser.add_argument('--home',required=True);parser.add_argument('--apply');parser.add_argument('--wait-pid',type=int);args=parser.parse_args()
@@ -101,7 +175,8 @@ def main():
     time.sleep(1)
    else:raise RuntimeError('Employee process is still active')
   from .updates import apply
-  apply(args.apply);record_applied(args.home)
+  try:apply(args.apply);record_applied(args.home,args.apply)
+  except Exception as error:record_apply_error(args.home,error);raise
  else:
   trust=json.loads((Path(args.program)/'client-trust.json').read_text(encoding='utf-8'));check_update(args.program,args.home,trust)
 if __name__=='__main__':main()
