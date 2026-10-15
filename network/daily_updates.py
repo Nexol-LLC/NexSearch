@@ -43,6 +43,13 @@ def local_status(program,home):
  with update_lock(home) as free:state['checking']=not free
  return state
 def role():return 'EmployeeMac' if sys.platform=='darwin' else 'EmployeeWindows'
+
+def older_package(installed,incoming):
+ def version(item):return tuple(int(part) for part in item.get('version','0').split('.'))
+ if version(incoming)!=version(installed):return version(incoming)<version(installed)
+ # New signed packages carry a build time, so an old cached build of the
+ # same version cannot replace a manually installed corrected release.
+ return bool(installed.get('built_at') and incoming.get('built_at',0)<installed['built_at'])
 def check_update(program,home,trust,agent=None,force=False):
  with update_lock(home) as free:
   if not free:return read_state(home)
@@ -82,8 +89,16 @@ def _check_update(program,home,trust,agent=None,force=False):
   if installed.get('source_commit')==info['source_commit']:
    state.update(phase='current',message='Установлена актуальная сборка' if host_fresh else 'Установлена сборка из кеша хоста; ждём сегодняшней проверки хоста')
    state.pop('pending_state',None);state.pop('pending_commit',None);write_state(home,state);return state
+  rejected=state.get('rejected_sha256')==info['sha256'] and state.get('rejected_installed_commit')==installed.get('source_commit')
+  if older_package({'version':installed.get('version','0')},{'version':info['version']}) or rejected:
+   if state.get('pending_commit')==info['source_commit']:state.pop('pending_state',None);state.pop('pending_commit',None)
+   state.update(phase='waiting',message='У сотрудника установлена более новая сборка. Ждём обновления пакета на хосте');write_state(home,state);return state
   if state.get('pending_commit')==info['source_commit'] and Path(state.get('pending_state') or '').is_file():
-   state.update(phase='ready',message='Обновление готово. Полностью закройте программу и откройте её после установки');write_state(home,state);return state
+   pending=json.loads(Path(state['pending_state']).read_text(encoding='utf-8'))
+   candidate=json.loads((Path(pending['stage'])/'release.json').read_text(encoding='utf-8'))
+   if not older_package(installed,candidate):
+    state.update(phase='ready',message='Обновление готово. Полностью закройте программу и откройте её после установки');write_state(home,state);return state
+   state.pop('pending_state',None);state.pop('pending_commit',None)
   if not isinstance(info['sha256'],str) or len(info['sha256'])!=64 or any(c not in '0123456789abcdef' for c in info['sha256']):raise ValueError('Некорректная контрольная сумма пакета')
   archive=home/'updates'/('employee-'+info['sha256']+'.zip');temporary=archive.with_suffix('.part')
   cached=archive.is_file() and archive.stat().st_size==info['size_bytes'] and hashlib.sha256(archive.read_bytes()).hexdigest()==info['sha256']
@@ -102,6 +117,13 @@ def _check_update(program,home,trust,agent=None,force=False):
    if size!=info['size_bytes'] or digest.hexdigest()!=info['sha256']:raise ValueError('Контрольная сумма комплекта не совпала')
    temporary.replace(archive)
   state.update(phase='verifying',message='Проверяем подпись и готовим установку');write_state(home,state)
+  import zipfile
+  from cryptography.hazmat.primitives.serialization import load_pem_public_key
+  with zipfile.ZipFile(archive) as packet:
+   raw=packet.read('release.json');load_pem_public_key((program/'updates-public.pem').read_bytes()).verify(packet.read('release.sig'),raw);candidate=json.loads(raw)
+  if candidate.get('source_commit')!=info['source_commit'] or candidate.get('version')!=info['version'] or candidate.get('role')!=role():raise ValueError('Метаданные пакета не совпали')
+  if older_package(installed,candidate):
+   state.update(phase='waiting',rejected_sha256=info['sha256'],rejected_installed_commit=installed.get('source_commit'),message='У сотрудника установлена более новая сборка. Ждём обновления пакета на хосте');write_state(home,state);return state
   from .updates import prepare
   prepared=prepare(archive,program,home,role())
   state.update(phase='ready',downloaded_sha256=info['sha256'],pending_state=prepared['state_file'],pending_commit=info['source_commit'],message='Обновление готово. Полностью закройте программу и откройте её после установки')
@@ -141,6 +163,13 @@ def apply_pending_on_exit(program,home):
  if os.environ.get('NEXSEARCH_NO_INSTALL'):return
  state=read_state(home);pending=state.get('pending_state')
  if not pending or not Path(pending).is_file():return
+ try:
+  installed=json.loads((Path(program)/'package-info.json').read_text(encoding='utf-8'))
+  prepared=json.loads(Path(pending).read_text(encoding='utf-8'))
+  candidate=json.loads((Path(prepared['stage'])/'release.json').read_text(encoding='utf-8'))
+ except (OSError,ValueError,KeyError):return
+ if installed.get('source_commit')==candidate.get('source_commit') or older_package(installed,candidate):
+  state.pop('pending_state',None);state.pop('pending_commit',None);state.update(phase='current',message='Старый пакет не установлен; сохранена текущая сборка');write_state(home,state);return
  program=Path(program);home=Path(home);folder=home/'updates';runner=folder/('runner-'+str(int(time.time()))+'.exe')
  if sys.platform=='win32':
   shutil.copy2(program/'NexSearch Maintenance.exe',runner)
