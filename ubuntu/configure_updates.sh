@@ -12,6 +12,10 @@ if not p.exists():
 ask=Path('/etc/nexsearch/github-askpass')
 ask.write_text('#!/usr/bin/python3\nimport json,sys\nc=json.load(open("/etc/nexsearch/github.json"));print(c["username"] if "username" in sys.argv[1].lower() else c["token"])\n');ask.chmod(0o700)
 PY
-systemctl enable --now nexsearch-update.timer
+for name in nexsearch-update-retry.service nexsearch-update-retry.timer; do
+  install -m 0644 "/opt/nexsearch/current/ubuntu/$name" "/etc/systemd/system/$name"
+done
+systemctl daemon-reload
+systemctl enable --now nexsearch-update.timer nexsearch-update-retry.timer
 systemctl start nexsearch-update.service
-echo 'Ежедневная проверка обеих веток в 10:00 МСК настроена.'
+echo 'Проверка в 10:00 МСК и повтор отложенных/неудачных обновлений каждые 5 минут настроены.'

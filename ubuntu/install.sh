@@ -43,7 +43,7 @@ install -m 0755 /opt/nexsearch/current/ubuntu/updater.py /opt/nexsearch/control/
 install -d -m 0755 /opt/nexsearch/control/network
 touch /opt/nexsearch/control/network/__init__.py
 install -m 0644 /opt/nexsearch/current/network/updates.py /opt/nexsearch/control/network/updates.py
-for name in nexsearch.service nexsearch-backup.service nexsearch-backup.timer nexsearch-update.service nexsearch-update.timer; do install -m 0644 "/opt/nexsearch/current/ubuntu/$name" "/etc/systemd/system/$name"; done
+for name in nexsearch.service nexsearch-backup.service nexsearch-backup.timer nexsearch-update.service nexsearch-update.timer nexsearch-update-retry.service nexsearch-update-retry.timer; do install -m 0644 "/opt/nexsearch/current/ubuntu/$name" "/etc/systemd/system/$name"; done
 timedatectl set-timezone Europe/Moscow
 for subnet in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
  ufw allow from "$subnet" to any port 22 proto tcp

@@ -6,6 +6,7 @@ import psycopg
 from .search import SearchWorker as BaseWorker,CONFIG,Http,SOURCES
 from .cancellation import scope,check,wait as pause,SearchCancelled
 from .scheduling import enqueue_due
+from .update_maintenance import can_start_search
 LOG=logging.getLogger('nexsearch.search')
 _lock=threading.Lock();_hosts={}
 class LimitedHttp(Http):
@@ -48,8 +49,9 @@ class SearchWorker(BaseWorker):
         with self.db.transaction(admin=True) as conn:conn.execute("UPDATE jobs SET status='error',message='Ошибка источника; найденные компании сохранены',finished_at=now() WHERE id=%s AND NOT stop_requested",(ident,))
        with self.cancel_lock:self.cancel_events.pop(str(ident),None)
      if len(pending)<4:
+      job=None
       with self.db.transaction(admin=True) as conn:
-       job=conn.execute("SELECT j.*,e.is_admin FROM jobs j JOIN employees e ON e.id=j.employee_id WHERE j.status='queued' AND NOT j.stop_requested AND e.active AND (e.approved OR e.is_admin) ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1").fetchone()
+       if can_start_search(conn):job=conn.execute("SELECT j.*,e.is_admin FROM jobs j JOIN employees e ON e.id=j.employee_id WHERE j.status='queued' AND NOT j.stop_requested AND e.active AND (e.approved OR e.is_admin) ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1").fetchone()
        if job:conn.execute("UPDATE jobs SET status='running',message='Поиск и проверка компаний' WHERE id=%s",(job['id'],))
       if job:pending[pool.submit(self.run,job)]=job['id'];continue
      self.wake.wait(.25);self.wake.clear()
