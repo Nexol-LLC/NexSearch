@@ -13,6 +13,8 @@ editCompany=company=>{
   if(JSON.stringify(phones)===JSON.stringify(company.phones||[])&&JSON.stringify(emails)===JSON.stringify(company.emails||[]))return;
   const updated=await api('/api/leads/'+company.id+'/contacts',{method:'PATCH',body:JSON.stringify({phones,emails,revision:company.contacts_revision||0})});
   Object.assign(company,updated);
+  const listed=rows.find(row=>row.id===company.id);if(listed)Object.assign(listed,updated);
+  if(['search','clients'].includes(view))render();
   for(const [label,values] of [['Телефоны',company.phones],['Почта',company.emails]]){
    const row=$$('#editor-body > .detail').find(row=>row.firstElementChild.textContent===label);
    const html=detail(label,values.join('\n'));
