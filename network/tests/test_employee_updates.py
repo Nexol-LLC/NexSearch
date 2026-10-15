@@ -88,10 +88,24 @@ def test_background_helper_and_ui_do_not_download_concurrently(setup):
 
 def test_record_applied_uses_actual_package_preserves_newer_pending(setup):
     s=setup;state=check(s);first=state['pending_state']
-    state.update(pending_state='newer-stage',pending_commit='newer');updater.write_state(s.home,state)
+    newer=s.home/'newer-stage.json';prepared=json.loads(Path(first).read_text())
+    prepared['verified_at']=(datetime.fromisoformat(prepared['verified_at'])+timedelta(minutes=1)).isoformat()
+    newer.write_text(json.dumps(prepared))
+    state.update(pending_state=str(newer),pending_commit='newer');updater.write_state(s.home,state)
     apply(first);updater.record_applied(s.home,first)
     result=updater.read_state(s.home)
-    assert result['installed_commit']=='new' and result['pending_state']=='newer-stage'
+    assert result['installed_commit']=='new' and result['pending_state']==str(newer)
+
+
+def test_manual_install_supersedes_older_pending_package(setup):
+    s=setup;state=check(s);first=state['pending_state']
+    older=s.home/'older-stage.json';prepared=json.loads(Path(first).read_text())
+    prepared['verified_at']=(datetime.fromisoformat(prepared['verified_at'])-timedelta(minutes=1)).isoformat()
+    older.write_text(json.dumps(prepared))
+    state.update(pending_state=str(older),pending_commit='old');updater.write_state(s.home,state)
+    apply(first);updater.record_applied(s.home,first)
+    result=updater.read_state(s.home)
+    assert result['phase']=='installed' and 'pending_state' not in result
 
 
 def test_failed_install_is_visible_and_keeps_pending(setup):
