@@ -32,7 +32,7 @@ async function quit(){if(exiting)return;exiting=true;hide();
 app.whenReady().then(()=>{
  if(process.platform==='darwin')app.dock?.setIcon(path.join(__dirname,'logo.png'));
  for(const s of [session.defaultSession,session.fromPartition('persist:nexsearch-services')]){s.setPermissionRequestHandler((_wc,_permission,cb)=>cb(false));s.setPermissionCheckHandler(()=>false);}
- win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.5.0',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
+ win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.5.1',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
  guard(win.webContents,true);win.on('close',event=>{if(!exiting){event.preventDefault();quit();}});
  for(const [name,fn] of Object.entries({'service:show':show,'service:hide':hide,'service:bounds':v=>active?.setBounds(bounds(v)),'service:back':()=>{if(active?.webContents.navigationHistory.canGoBack())active.webContents.navigationHistory.goBack();},'service:reload':()=>active?.webContents.reload(),'update:prepare':async()=>{
   if(process.platform!=='win32'||!program||!home)throw Error('Используйте комплект и инструкцию обновления для этой платформы');

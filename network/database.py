@@ -47,6 +47,8 @@ class Database:
 
     def ingest(self,item,employee=None,processing=False,job=None):
         """A global company identity and a permanent, unique employee reservation."""
+        # Working contacts are written only by the authenticated contact editor.
+        item={key:value for key,value in item.items() if key!='contact_overrides'}
         from collector import identities,signatures,valid_inn,unique_phones
         keys=identities(item);weak=signatures(item)
         if not keys and not weak:raise ValueError('Нет идентификаторов компании')
