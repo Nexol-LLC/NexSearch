@@ -266,4 +266,25 @@ def create_app(*args,**kwargs):
         return Response(data,media_type='application/octet-stream',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe=''),'Content-Security-Policy':"sandbox; default-src 'none'"})
     @app.post('/api/mail/send')
     def send_message(body:SendMail,user=Depends(employee)):return mail.send(user['id'],body)
+    @app.get('/api/remote/status')
+    def remote_status(user=Depends(employee)):
+        remote=getattr(app.state,'remote_access',None)
+        if not remote:return {'phase':'unavailable','message':'Удалённый доступ недоступен в этом тестовом запуске'}
+        result=remote.status()
+        if user['role']!='director':result.pop('auth_url',None);result.pop('config',None)
+        return result
+    @app.post('/api/remote/config')
+    def remote_config(body:dict,user=Depends(employee)):
+        if user['role']!='director':raise HTTPException(403,'Настраивать удалённый доступ хоста может только директор')
+        remote=getattr(app.state,'remote_access',None)
+        if not remote:raise HTTPException(503,'Модуль удалённого доступа хоста недоступен')
+        try:result=remote.configure(body)
+        except ValueError as error:raise HTTPException(422,str(error)) from None
+        db.audit(user['id'],'remote.configure','host',{'enabled':result['config']['enabled'],'provider':result['config']['provider']});return result
+    @app.post('/api/remote/login')
+    def remote_login(user=Depends(employee)):
+        if user['role']!='director':raise HTTPException(403,'Подключить хост к VPN может только директор')
+        remote=getattr(app.state,'remote_access',None)
+        if not remote:raise HTTPException(503,'Модуль удалённого доступа хоста недоступен')
+        return remote.login()
     return app

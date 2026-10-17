@@ -78,7 +78,9 @@ def apply(state_file,timeout=120):
   for name in expected:
    destination=safe_target(program,name);source=safe_target(stage,name);backup=safe_target(rollback,name)
    if destination.exists():backup.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,backup)
-   destination.parent.mkdir(parents=True,exist_ok=True);pending=destination.with_name(destination.name+'.nex-update');shutil.copy2(source,pending);pending.replace(destination);replaced.append(name)
+   destination.parent.mkdir(parents=True,exist_ok=True);pending=destination.with_name(destination.name+'.nex-update');shutil.copy2(source,pending)
+   if os.name!='nt' and name.startswith('network/bin/') and destination.name=='nexsearch-vpn':pending.chmod(0o755)
+   pending.replace(destination);replaced.append(name)
  except Exception:
   for name in reversed(replaced):
    old=safe_target(rollback,name)

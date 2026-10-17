@@ -8,6 +8,10 @@ def build(kind):
  name='NexSearch Maintenance' if kind=='Maintenance' else 'NexSearch'
  command=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onefile','--name',name,'--distpath',str(out),'--workpath',str(ROOT/'build'/kind),'--specpath',str(ROOT/'build')]
  if kind!='Maintenance':command+=['--windowed','--add-data',str(ROOT/'network/web')+';network/web','--add-data',str(ROOT/'network/client-trust.json')+';network','--add-data',str(ROOT/'version.json')+';.','--collect-all','zeroconf']
+ if kind!='Maintenance':
+  helper=ROOT/'network/bin/windows-amd64/nexsearch-vpn.exe'
+  if not helper.is_file():raise RuntimeError('Build VPN first: python vpn/build.py windows-amd64')
+  command+=['--add-binary',str(helper)+';network/bin/windows-amd64']
  command+=['--collect-data','certifi','--exclude-module','pytest','--exclude-module','numpy','--exclude-module','PIL']
  if kind=='HostWindows':
   for name2,dest in [('network/schema.sql','network'),('network/schema14.sql','network'),('network/schema15.sql','network'),('network/schema16.sql','network'),('network/data','network/data'),('pack','pack'),('timezones.json','.')]:command+=['--add-data',str(ROOT/name2)+';'+dest]
@@ -17,6 +21,9 @@ def build(kind):
  if kind!='Maintenance':
   shutil.copy2(ROOT/'network/client-trust.json',out/'client-trust.json');shutil.copy2(ROOT/'updates-public.pem',out/'updates-public.pem')
   shutil.copytree(ROOT/'desktop/app',out/'desktop/app',dirs_exist_ok=True)
+  notices=out/'licenses';notices.mkdir(exist_ok=True)
+  shutil.copy2(ROOT/'vpn/TAILSCALE-LICENSE.txt',notices/'TAILSCALE-LICENSE.txt')
+  shutil.copy2(ROOT/'network/bin/windows-amd64/THIRD-PARTY-NOTICES.txt',notices/'VPN-THIRD-PARTY-NOTICES.txt')
 if __name__=='__main__':
  p=argparse.ArgumentParser();p.add_argument('kind',choices=['EmployeeWindows','HostWindows','Maintenance','all']);a=p.parse_args()
  for kind in ['EmployeeWindows','HostWindows','Maintenance'] if a.kind=='all' else [a.kind]:build(kind)

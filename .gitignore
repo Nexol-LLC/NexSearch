@@ -19,3 +19,4 @@ identity/
 .env*
 Данные хоста/
 host.env
+network/bin/

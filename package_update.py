@@ -17,7 +17,9 @@ def package(role,output,key,commit):
    if p.is_file():files[p.relative_to(ROOT/'dist/EmployeeWindows').as_posix()]=p.read_bytes()
   files['NexSearch Maintenance.exe']=(ROOT/'dist/Maintenance/NexSearch Maintenance.exe').read_bytes()
  elif role in ('EmployeeMac','HostUbuntu'):
-  for p,name in source_files():files[name]=p.read_bytes()
+  for p,name in source_files():
+   if name.startswith('network/bin/') and not name.startswith('network/bin/'+('darwin-' if role=='EmployeeMac' else 'linux-')):continue
+   files[name]=p.read_bytes()
   files['client-trust.json']=(ROOT/'network/client-trust.json').read_bytes()
  else:raise ValueError(role)
  metadata={'version':version,'source_commit':commit,'role':role,'schema':version_info['schema'],'built_at':int(time.time())}

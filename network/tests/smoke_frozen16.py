@@ -28,7 +28,9 @@ def stop(url,process):
     finally:process.wait(timeout=90)
 
 def main():
-    home=ROOT/'preview/frozen-smoke16';home.mkdir(parents=True,exist_ok=True)
+    # Keep every run independent: a prior company reservation belongs to its
+    # previous employee and must never be reassigned to make a smoke test pass.
+    base=ROOT/'preview/frozen-smoke16';home=base/('run-'+secrets.token_hex(4));home.mkdir(parents=True,exist_ok=True)
     host_home=home/'host';employee_home=home/'employee'
     host=employee=None
     trust_paths=[ROOT/'dist/HostWindows/client-trust.json',ROOT/'dist/EmployeeWindows/client-trust.json']
@@ -67,12 +69,25 @@ def main():
         index=requests.get(ui,timeout=5).text;assert '1.6.0' in index and 'workspace16.js' in index
         data=requests.get(ui+'/api/leads',timeout=5).json()['companies'];assert data[0]['company_time']['utc_offset']==4
         assert requests.get(ui+'/api/mail/accounts',timeout=5).json()['accounts']==[]
+        assert requests.get(ui+'/api/client/vpn/status',timeout=5).json()['phase']=='disabled'
+        assert 'vpn16.js' in index
+        assert requests.get(ui+'/assets/vpn16.js',timeout=5).status_code==200
         csrf=requests.get(ui+'/api/connection',timeout=5).json()['csrf'];headers={'Origin':ui,'X-Nexol-CSRF':csrf}
+        enabled=requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':True,'provider':'tailscale'},timeout=10)
+        assert enabled.status_code==200,enabled.text
+        deadline=time.monotonic()+30
+        while time.monotonic()<deadline:
+            vpn=requests.get(ui+'/api/client/vpn/status',timeout=5).json()
+            if vpn['phase']=='needs_login' and vpn.get('auth_url'):break
+            assert vpn['phase'] not in ('missing','error'),vpn['message']
+            time.sleep(.3)
+        else:raise RuntimeError('The bundled native VPN helper did not reach first-login state')
+        assert requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':False},timeout=20).status_code==200
         task=requests.post(ui+'/api/tasks',headers=headers,json={'title':'Compiled task 1.6','due_at':(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()},timeout=5)
         assert task.status_code==200,task.text
         assert requests.get(ui+'/api/notifications',timeout=5).json()['unread']>=1
-        print('Compiled HostWindows and EmployeeWindows: startup, PostgreSQL migration, timezone assets, mail routes, tasks and notifications passed.',flush=True)
-        (home/'result.json').write_text(json.dumps({'version':'1.6.0','compiled_host':True,'compiled_employee':True,'schema':16,'passed':True}),encoding='utf-8')
+        print('Compiled HostWindows and EmployeeWindows: startup, PostgreSQL migration, timezone assets, mail routes, tasks, notifications and bundled native VPN onboarding passed.',flush=True)
+        (base/'result.json').write_text(json.dumps({'version':'1.6.0','compiled_host':True,'compiled_employee':True,'schema':16,'passed':True,'test_home':str(home)}),encoding='utf-8')
     finally:
         try:stop('http://127.0.0.1:9060',employee)
         finally:

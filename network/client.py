@@ -39,12 +39,36 @@ class EmployeeAgent:
         secure_store.write(self.path,self.state)
         self.csrf=secrets.token_urlsafe(32);self.lock=threading.Lock();self.url=self.state.get('host_url');self.discovery=None;self.legacy_paths=[];self.import_lock=threading.Lock()
         self.session=requests.Session();self.session.trust_env=False;self.session.mount('https://',PinnedAdapter(trust['fingerprint']))
+        self.lan_url=self.url;self.vpn_url=None;self.connection_mode='lan';self.last_lan_probe=0.
+        from .remote_access import RemoteAccess
+        self.vpn=RemoteAccess(self.home/'vpn',trust,device=self.state['device_id'],on_remote=self.remote_found)
+    def remote_found(self,url):
+        with self.lock:
+            previous=self.vpn_url;self.vpn_url=url;lan=self.lan_url;current=self.url
+        if not url:
+            with self.lock:
+                if self.url==previous:self.url=lan;self.connection_mode='lan'
+            return
+        if lan and current==lan and time_since(self.last_lan_probe)<10:return
+        self.last_lan_probe=__import__('time').monotonic()
+        if lan:
+            try:
+                reply=self.session.get(lan+'/api/host-info',timeout=1,allow_redirects=False)
+                if reply.ok and reply.json().get('host_id')==self.trust['host_id']:
+                    with self.lock:self.url=lan;self.connection_mode='lan'
+                    return
+            except (requests.RequestException,ValueError):pass
+        try:
+            reply=self.session.get(url+'/api/host-info',timeout=2,allow_redirects=False)
+            if reply.ok and reply.json().get('host_id')==self.trust['host_id']:
+                with self.lock:self.url=url;self.connection_mode='vpn'
+        except (requests.RequestException,ValueError):pass
     def found(self,url):
         if not is_local(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit(url).hostname):return
         try:
             response=self.session.get(url+'/api/host-info',timeout=2)
             if response.ok and response.json().get('host_id')==self.trust['host_id']:
-                with self.lock:self.url=url;self.state['host_url']=url;secure_store.write(self.path,self.state)
+                with self.lock:self.url=url;self.lan_url=url;self.connection_mode='lan';self.state['host_url']=url;secure_store.write(self.path,self.state)
                 if self.state.get('token'):self.import_legacy()
         except requests.RequestException:pass
     def request(self,path,method='GET',body=b'',content_type='application/json'):
@@ -128,7 +152,8 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
             if not self.valid():return self.send({'error':'Недопустимый адрес'},403)
             path=__import__('urllib.parse',fromlist=['urlsplit']).urlsplit(self.path).path
             if path=='/api/events':return self.stream_events()
-            if path=='/api/connection':return self.send(dict(host_found=bool(agent.url),host_url=agent.url,csrf=agent.csrf,profile=agent.state.get('profile'),computer=agent.state['computer_name']))
+            if path=='/api/connection':return self.send(dict(host_found=bool(agent.url),host_url=agent.url,transport=agent.connection_mode,csrf=agent.csrf,profile=agent.state.get('profile'),computer=agent.state['computer_name']))
+            if path=='/api/client/vpn/status':return self.send(agent.vpn.status())
             if path=='/api/client/update/status':
                 from .daily_updates import local_status
                 updater=getattr(agent,'updater',None)
@@ -165,6 +190,8 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
                 length=int(self.headers.get('Content-Length','0'))
                 if length<0 or length>5*1024*1024:return self.send({'error':'Слишком большой запрос'},413)
                 body=self.rfile.read(length)
+                if self.path=='/api/client/vpn/config':return self.send(agent.vpn.configure(json.loads(body)))
+                if self.path=='/api/client/vpn/login':return self.send(agent.vpn.login())
                 if self.path=='/api/client/update/check':
                     updater=getattr(agent,'updater',None)
                     if updater:threading.Thread(target=updater.check,args=(True,),daemon=True).start()
@@ -188,10 +215,14 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
         from .broadcast import EmployeeBroadcast
         agent.broadcast=EmployeeBroadcast(trust,agent.found)
     if agent.url:threading.Thread(target=agent.found,args=(agent.url,),daemon=True).start()
+    agent.vpn.start()
     if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}')
     def close():
+        agent.vpn.close()
         server.shutdown();server.server_close();callback.shutdown();callback.server_close()
         if agent.discovery:agent.discovery.close()
         if getattr(agent,'broadcast',None):agent.broadcast.close()
         agent.session.close()
     return server,agent,close
+
+def time_since(moment):return __import__('time').monotonic()-moment

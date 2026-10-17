@@ -30,6 +30,8 @@ def main():
     # This fixture owns only its dedicated loopback cluster, never the user's DB.
     with db.transaction(admin=True) as c:c.execute('TRUNCATE employees,companies,jobs,carriers,audit_events,company_checks CASCADE')
     app=create_app(db,web=ROOT/'network/web',pack=ROOT/'pack',start_worker=False)
+    from network.remote_access import RemoteAccess
+    remote=app.state.remote_access=RemoteAccess(HOME/'vpn-host',trust,mode='host',port=9037)
     auth=Authentication(db);people={}
     for name,first,last,role in [('employee','Анна','Петрова','logist'),('colleague','Иван','Орлов','logist'),('manager','Алексей','Волков','manager'),('director','Елена','Смирнова','director')]:
         result=auth.register(first,last,secrets.token_urlsafe(24),'preview16-'+name,'Тестовый компьютер','127.0.0.1',login='preview.'+name)
@@ -85,6 +87,7 @@ def main():
         while not stop.exists():time.sleep(.5)
     finally:
         for close in clients:close()
+        remote.close()
         server.should_exit=True;thread.join(timeout=15);db.close();stop_postgres(HOME,runtime)
 
 if __name__=='__main__':main()

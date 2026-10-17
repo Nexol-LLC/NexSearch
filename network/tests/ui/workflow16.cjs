@@ -77,6 +77,6 @@ let app;
  await page.waitForSelector('#task-title');assert.equal(await page.inputValue('#task-title'),'Задача от руководителя 1.6');
  assert.deepEqual(errors,[]);console.log('Manager delegation and employee notification deep link: passed. No JavaScript errors.');
  await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.0',passed:true,errors,screenshots:['company-card.png','mail.png','notifications.png','manager-tasks.png']},null,2));
-})().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
+})().catch(async error=>{console.error(error);if(app){const page=await app.firstWindow();await page.screenshot({path:path.join(out,'failure.png')});console.error(await page.evaluate(()=>({view,nav,workspaceOwner,taskNew:!!$('#task-new'),scope:!!$('#task-scope16'),operationsHidden:$('#operations-view').hidden,title:$('#page-heading').textContent}))) }process.exitCode=1}).finally(async()=>{
  if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}
 });

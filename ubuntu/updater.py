@@ -68,7 +68,7 @@ def host_install(archive,digest,state):
   target=BASE/'releases'/('github-'+digest[:20])
   if not target.exists():shutil.copytree(stage,target,ignore=shutil.ignore_patterns('release.json','release.sig','update-state.json'))
   target.chmod(0o755)
-  for entry in target.rglob('*'):entry.chmod(0o755 if entry.is_dir() else 0o644)
+  for entry in target.rglob('*'):entry.chmod(0o755 if entry.is_dir() or (entry.name=='nexsearch-vpn' and entry.parent.parent==target/'network/bin') else 0o644)
   shutil.rmtree(stage)
   # Dependencies and all privileged migrations come only from signed packages.
   run(str(BASE/'venv/bin/pip'),'install','-r',str(target/'network/requirements.txt'),stdout=subprocess.DEVNULL)

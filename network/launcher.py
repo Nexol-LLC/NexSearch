@@ -87,7 +87,7 @@ def run_host():
     import uvicorn
     home=home_for('host');configure(home);instance=Instance(home)
     if not instance.acquire():return
-    db=None;server=None;bridge_close=None;discovery=None;pg_started=False;runtime=Path(os.environ.get('NEXOL_POSTGRES_RUNTIME',program_dir()/'postgres'))
+    db=None;server=None;bridge_close=None;discovery=None;remote=None;pg_started=False;runtime=Path(os.environ.get('NEXOL_POSTGRES_RUNTIME',program_dir()/'postgres'))
     try:
         bundle=resources()/'network/identity'
         if not bundle.exists():bundle=program_dir()/'network/identity'
@@ -115,6 +115,8 @@ def run_host():
             shutil.copy2(seed,home/'host-secrets.enc')
         app=create_app(db,web=resources()/'network/web',pack=pack)
         port=int(os.environ.get('NEXOL_HOST_PORT','8743'))
+        from .remote_access import RemoteAccess
+        remote=app.state.remote_access=RemoteAccess(home/'vpn-host',trust,mode='host',port=port);remote.start()
         server=uvicorn.Server(uvicorn.Config(app,host='0.0.0.0',port=port,ssl_certfile=str(cert),ssl_keyfile=str(key),log_config=None,access_log=False))
         thread=threading.Thread(target=server.run,daemon=True);thread.start()
         for _ in range(300):
@@ -128,6 +130,7 @@ def run_host():
         instance.ready(bridge.server_port);open_window(f'http://127.0.0.1:{bridge.server_port}/',home,program_dir(),'host');bridge.serve_forever()
     except Exception:show_error(home);raise
     finally:
+        if remote:remote.close()
         if discovery:discovery.close()
         if server:
             server.should_exit=True
