@@ -29,12 +29,16 @@ class Database:
     def initialize(self):
         with self.transaction(admin=True) as db:
             ready=db.execute("SELECT to_regclass('public.schema_meta') AS ready").fetchone()['ready']
-            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=15').fetchone():return
+            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=16').fetchone():return
+            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=15').fetchone():
+                db.execute(Path(__file__).with_name('schema16.sql').read_text(encoding='utf-8'));return
             if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=14').fetchone():
-                db.execute(Path(__file__).with_name('schema15.sql').read_text(encoding='utf-8'));return
+                db.execute(Path(__file__).with_name('schema15.sql').read_text(encoding='utf-8'))
+                db.execute(Path(__file__).with_name('schema16.sql').read_text(encoding='utf-8'));return
             db.execute(Path(__file__).with_name('schema.sql').read_text(encoding='utf-8'))
             db.execute(Path(__file__).with_name('schema14.sql').read_text(encoding='utf-8'))
             db.execute(Path(__file__).with_name('schema15.sql').read_text(encoding='utf-8'))
+            db.execute(Path(__file__).with_name('schema16.sql').read_text(encoding='utf-8'))
 
     def audit(self,employee,kind,entity='',details=None,ip=''):
         import json

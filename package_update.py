@@ -3,15 +3,15 @@ from pathlib import Path
 import sys,os,json,base64,zipfile,hashlib,argparse,subprocess,time
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 ROOT=Path(__file__).resolve().parent
-IGNORED={'.git','.updates','.github','.runtime','identity','__pycache__','.pytest_cache','build','dist','preview','research','tests'}
+IGNORED={'.git','.updates','.github','.runtime','identity','__pycache__','.pytest_cache','build','dist','preview','research','tests','company-collector','.venv','node_modules'}
 def source_files():
  for p in ROOT.rglob('*'):
   rel=p.relative_to(ROOT)
-  if not p.is_file() or any(x in IGNORED for x in rel.parts) or p.suffix in ('.sec','.enc','.pyc','.db','.dump','.zip','.gz','.env'):continue
+  if not p.is_file() or any(x in IGNORED for x in rel.parts) or p.name.startswith('.env') or p.suffix in ('.sec','.enc','.pyc','.db','.sqlite','.sqlite3','.dump','.zip','.gz','.env'):continue
   if p.suffix=='.pem' and p.name!='updates-public.pem':continue
   yield p,rel.as_posix()
 def package(role,output,key,commit):
- version=json.loads((ROOT/'version.json').read_text())['version'];files={}
+ version_info=json.loads((ROOT/'version.json').read_text());version=version_info['version'];files={}
  if role=='EmployeeWindows':
   for p in (ROOT/'dist/EmployeeWindows').rglob('*'):
    if p.is_file():files[p.relative_to(ROOT/'dist/EmployeeWindows').as_posix()]=p.read_bytes()
@@ -20,7 +20,7 @@ def package(role,output,key,commit):
   for p,name in source_files():files[name]=p.read_bytes()
   files['client-trust.json']=(ROOT/'network/client-trust.json').read_bytes()
  else:raise ValueError(role)
- metadata={'version':version,'source_commit':commit,'role':role,'schema':15,'built_at':int(time.time())}
+ metadata={'version':version,'source_commit':commit,'role':role,'schema':version_info['schema'],'built_at':int(time.time())}
  files['package-info.json']=json.dumps(metadata,indent=2).encode()
  manifest={**metadata,'files':{role+'/'+name:hashlib.sha256(data).hexdigest() for name,data in sorted(files.items())}}
  raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)

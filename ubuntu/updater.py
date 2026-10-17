@@ -75,7 +75,7 @@ def host_install(archive,digest,state):
   run('systemctl','stop','nexsearch')
   try:
    migration="import psycopg,sys; from pathlib import Path; c=psycopg.connect('dbname=nexsearch'); c.execute('SET ROLE nexsearch_owner'); c.execute(\"SELECT set_config('nexol.is_admin','true',true)\"); [c.execute(Path(p).read_text()) for p in sys.argv[1:]]; c.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO nexsearch_app'); c.execute('GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO nexsearch_app'); c.execute('REVOKE UPDATE,DELETE ON audit_events,call_records FROM nexsearch_app'); c.commit()"
-   run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),'-c',migration,str(target/'network/schema14.sql'),str(target/'network/schema15.sql'))
+   run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),'-c',migration,str(target/'network/schema14.sql'),str(target/'network/schema15.sql'),str(target/'network/schema16.sql'))
    pending=BASE/'current.new';pending.unlink(missing_ok=True);pending.symlink_to(target);pending.replace(current)
    run('systemctl','start','nexsearch')
    if not healthy():raise RuntimeError('Updated host did not pass health check')

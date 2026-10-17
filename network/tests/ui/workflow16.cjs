@@ -1,0 +1,82 @@
+/* Integration against the isolated preview16 host and its real PostgreSQL. */
+const assert=require('node:assert/strict'),path=require('node:path'),fs=require('node:fs/promises');
+const {_electron}=require('playwright');
+const root=path.resolve(__dirname,'../../..'),out=path.join(root,'preview/qa16-ui');
+let app;
+(async()=>{
+ await fs.mkdir(out,{recursive:true});
+ const ready=JSON.parse(await fs.readFile(path.join(root,'network/.runtime/preview16/ready.json'),'utf8'));
+ const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+ app=await _electron.launch({executablePath:path.join(root,'preview/HostWindows/desktop/runtime/electron.exe'),args:[path.join(root,'desktop/app'),'--url='+ready.employee,'--profile='+out,'--hidden'],env});
+ let page=await app.firstWindow();const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await app.evaluate(({BrowserWindow})=>{for(const w of BrowserWindow.getAllWindows()){w.webContents.setBackgroundThrottling(false);w.showInactive()}});
+ await page.waitForSelector('#workspace:not([hidden])',{timeout:30000});
+ assert.equal(await page.locator('.brand small').innerText(),'версия 1.6.0');
+ await page.click('[data-view="clients"]');await page.waitForSelector('#kanban:not([hidden]) .kanban-card');
+ assert((await page.locator('#kanban').innerText()).includes('МСК+1'));
+ await page.click('[data-view="carriers"]');await page.waitForSelector('[data-carrier15]');
+ assert(await page.locator('#kanban').isHidden());assert(await page.locator('#table-panel').isVisible());
+ assert((await page.locator('#table-body').innerText()).includes('ДЕМО Перевозчик'));
+ await page.route('**/api/clients?*',async route=>{await new Promise(resolve=>setTimeout(resolve,400));await route.continue()});
+ await page.click('[data-view="clients"]');await page.click('[data-view="carriers"]');
+ await page.waitForSelector('[data-carrier15]');await page.waitForTimeout(550);
+ assert((await page.locator('#table-body').innerText()).includes('ДЕМО Перевозчик'));assert(await page.locator('#kanban').isHidden());
+ await page.unroute('**/api/clients?*');
+ console.log('Client kanban -> carriers, including a delayed client response: passed.');
+ await page.click('[data-view="search"]');await page.waitForSelector('#table-body tr[data-id]');
+ assert(await page.locator('#inn-search16').isVisible());
+ await page.locator('#table-body tr[data-id]').first().click();
+ for(const id of ['client-new-call','client-contacts','lead-task15'])assert(await page.locator('#'+id).isVisible());
+ assert(await page.locator('.company-summary16 .company-clock16').isVisible());
+ await page.screenshot({path:path.join(out,'company-card.png'),animations:'disabled'});
+ await page.click('[data-company-tab="contacts"]');await page.fill('#working-emails151','updated'+Date.now()+'@example.org');
+ await page.click('#save-contacts151');await page.waitForFunction(()=>document.querySelector('#contacts-state151').textContent==='Контакты сохранены');
+ assert(await page.locator('[data-company-tab16="overview"]').first().isHidden());
+ await page.click('[data-company-tab="overview"]');assert((await page.locator('#editor-body').innerText()).includes('updated'));
+ await page.click('#lead-task15');await page.waitForSelector('#task-owner16');
+ assert.equal(await page.locator('#task-owner16 option').count(),1);
+ await page.fill('#task-title','ДЕМО проверить условия');await page.click('#save-editor');await page.waitForSelector('#editor',{state:'hidden'});
+ await page.click('[data-view="tasks"]');await page.waitForFunction(()=>document.querySelector('#task-list')?.textContent.includes('ДЕМО проверить условия'));
+ await page.click('[data-view="search"]');await page.waitForSelector('#inn-find16');await page.fill('#inn-value16',ready.inn);await page.click('#inn-find16');
+ await page.waitForSelector('#editor.company-dialog16[open]');assert((await page.locator('#editor-title').innerText()).includes('ДЕМО Машины'));
+ await page.click('#close-editor');
+ console.log('Company card actions, contact editing, timezone, task creation and INN lookup: passed.');
+ await page.click('[data-view="mail"]');await page.waitForSelector('#mail-items16 [data-mail-id16]');
+ await page.locator('#mail-items16 [data-mail-id16]').first().click();await page.waitForSelector('#mail-reader16 .mail-body-text16');
+ assert((await page.locator('#mail-reader16').innerText()).includes('Самара — Москва'));
+ await page.screenshot({path:path.join(out,'mail.png'),animations:'disabled'});
+ await page.click('#mail-reply16');await page.waitForSelector('#compose-to16');
+ assert.equal(await page.inputValue('#compose-to16'),'logistics1@example.org');
+ let sent=null;await page.route('**/api/mail/send',async route=>{sent=route.request().postDataJSON();await route.fulfill({json:{sent:true,warning:''}})});
+ await page.fill('#compose-text16','Учебный ответ');await page.click('#save-editor');await page.waitForSelector('#editor',{state:'hidden'});
+ assert.equal(sent.text,'Учебный ответ');assert(sent.reply_to);await page.unroute('**/api/mail/send');
+ await page.click('#notifications-bell16');await page.waitForSelector('#alerts-list16 [data-alert16]');
+ await page.screenshot({path:path.join(out,'notifications.png'),animations:'disabled'});
+ await page.click('#alerts-read16');await page.waitForFunction(()=>document.querySelector('#alerts-count16').textContent==='0 непрочитанных');await page.click('#alerts-close16');
+ await page.click('[data-view="carriers"]');await page.waitForSelector('[data-carrier15]');assert(await page.locator('#mail-view16').isHidden());
+ console.log('Personal mailbox, reply draft, send command, notification read state and mail navigation: passed.');
+ // A native window is deliberately bound to one local origin. Relaunch rather
+ // than weakening its IPC trust checks to impersonate another employee.
+ const launchRole=async(role)=>{
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close();
+  app=await _electron.launch({executablePath:path.join(root,'preview/HostWindows/desktop/runtime/electron.exe'),args:[path.join(root,'desktop/app'),'--url='+ready[role],'--profile='+path.join(out,role),'--hidden'],env});
+  page=await app.firstWindow();page.on('pageerror',error=>errors.push(error.message));
+  await app.evaluate(({BrowserWindow})=>{for(const w of BrowserWindow.getAllWindows()){w.webContents.setBackgroundThrottling(false);w.showInactive()}});
+  await page.waitForSelector('#workspace:not([hidden])');
+ };
+ await launchRole('manager');
+ await page.click('[data-view="tasks"]');await page.waitForSelector('#task-scope16');await page.click('#task-new');await page.waitForSelector('#task-owner16');
+ assert.equal(await page.locator('#task-owner16 option').count(),3);
+ const employee=await page.locator('#task-owner16 option').evaluateAll(options=>options.find(o=>o.textContent.includes('Анна')).value);
+ await page.selectOption('#task-owner16',employee);await page.waitForFunction(()=>!document.querySelector('#save-editor').disabled);
+ await page.fill('#task-title','Задача от руководителя 1.6');await page.click('#save-editor');await page.waitForSelector('#editor',{state:'hidden'});
+ await page.screenshot({path:path.join(out,'manager-tasks.png'),animations:'disabled'});
+ await launchRole('employee');await page.click('#notifications-bell16');
+ await page.waitForFunction(()=>document.querySelector('#alerts-list16').textContent.includes('Задача от руководителя 1.6'));
+ await page.locator('[data-alert16]').filter({hasText:'Задача от руководителя 1.6'}).first().click();
+ await page.waitForSelector('#task-title');assert.equal(await page.inputValue('#task-title'),'Задача от руководителя 1.6');
+ assert.deepEqual(errors,[]);console.log('Manager delegation and employee notification deep link: passed. No JavaScript errors.');
+ await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.0',passed:true,errors,screenshots:['company-card.png','mail.png','notifications.png','manager-tasks.png']},null,2));
+})().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
+ if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}
+});

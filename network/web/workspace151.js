@@ -18,7 +18,8 @@ editCompany=company=>{
   for(const [label,values] of [['Телефоны',company.phones],['Почта',company.emails]]){
    const row=$$('#editor-body > .detail').find(row=>row.firstElementChild.textContent===label);
    const html=detail(label,values.join('\n'));
-   if(row)row.outerHTML=html;else if(html)form.insertAdjacentHTML('beforebegin',html);
+   if(row){const template=document.createElement('template');template.innerHTML=html;row.innerHTML=template.content.firstElementChild.innerHTML}
+   else if(html){form.insertAdjacentHTML('beforebegin',html);if(form.previousElementSibling&&document.querySelector('.company-dialog16')){form.previousElementSibling.dataset.companyTab16='overview';form.previousElementSibling.hidden=true}}
   }
   $('#working-phones151').value=company.phones.join('\n');$('#working-emails151').value=company.emails.join('\n');
   $('#contacts-state151').textContent='Контакты сохранены';

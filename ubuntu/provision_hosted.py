@@ -17,7 +17,7 @@ with psycopg.connect('dbname=postgres',autocommit=True) as conn:
  if not exists:conn.execute('CREATE DATABASE nexsearch OWNER nexsearch_owner')
 with psycopg.connect('dbname=nexsearch') as conn:
  conn.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto');conn.execute('SET ROLE nexsearch_owner');conn.execute("SELECT set_config('nexol.is_admin','true',true)")
- for name in ('schema.sql','schema14.sql','schema15.sql'):conn.execute((root/'network'/name).read_text())
+ for name in ('schema.sql','schema14.sql','schema15.sql','schema16.sql'):conn.execute((root/'network'/name).read_text())
  conn.execute("INSERT INTO employees(id,login,first_name,last_name,password_hash,is_admin,role,requested_role,approved) VALUES(%s,'host','Хост','NexSearch',%s,true,'director','director',true)",(uuid4(),seed['password_hash']))
  conn.execute('GRANT USAGE ON SCHEMA public TO nexsearch_app')
  conn.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO nexsearch_app')

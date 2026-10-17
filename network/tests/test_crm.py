@@ -21,7 +21,9 @@ def pg():
     runtime=Path(os.environ.get('NEXSEARCH_TEST_POSTGRES',ROOT/'network/.runtime/postgres'))
     dsn=start_postgres(home,runtime,int(os.environ.get('NEXSEARCH_TEST_PORT','54354')))
     database=Database(dsn);database.initialize()
-    with database.transaction(admin=True) as conn:conn.execute((ROOT/'network/schema14.sql').read_text(encoding='utf-8'))
+    with database.transaction(admin=True) as conn:
+        conn.execute((ROOT/'network/schema14.sql').read_text(encoding='utf-8'))
+        conn.execute((ROOT/'network/schema16.sql').read_text(encoding='utf-8'))
     yield database
     database.close()
     if (home/'postgres-data/postmaster.pid').exists():stop_postgres(home,runtime)

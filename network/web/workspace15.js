@@ -18,6 +18,8 @@ render=()=>{
  if(view!=='carriers'){
   renderBefore15();$$('#table-body tr[data-id]').forEach(tr=>{const c=rows.find(r=>r.id===tr.dataset.id);if(!c)return;const inn=tr.querySelector('td:first-child small');if(inn)inn.innerHTML='ИНН '+copyButton(c.inn);const code=c.verification?.okved;if(code)tr.querySelector('td:nth-child(2)').insertAdjacentHTML('beforeend','<small class="meta">ОКВЭД '+copyButton(code)+'</small>')});return
  }
+ // Carriers use the shared table area, never the previous client's kanban.
+ $('#kanban').hidden=true;$('#table-panel').hidden=false;
  const q=$('#search-input').value.toLowerCase(),filtered=carriers.filter(c=>[c.name,c.contacts,c.phone,c.email,c.routes,c.description,c.work_terms,...(c.vehicles||[]).map(v=>v.name+' '+v.location)].join(' ').toLowerCase().includes(q)&&(!(fleetKind||fleetMinWeight||fleetMinPayload||fleetMinVolume)||(c.vehicles||[]).some(fleetMatches)));
  const metric=c=>{const values=(c.vehicles||[]).filter(fleetMatches).map(v=>fleetSort==='volume'?cubic(v):v[fleetSort==='payload'?'payload_kg':'weight_kg']).filter(v=>v!=null);return values.length?Math.max(...values):null};
  filtered.sort((a,b)=>fleetSort==='name'?a.name.localeCompare(b.name,'ru'):(metric(b)??-Infinity)-(metric(a)??-Infinity)||a.name.localeCompare(b.name,'ru'));
