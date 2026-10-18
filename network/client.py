@@ -39,41 +39,61 @@ class EmployeeAgent:
         secure_store.write(self.path,self.state)
         self.csrf=secrets.token_urlsafe(32);self.lock=threading.Lock();self.url=self.state.get('host_url');self.discovery=None;self.legacy_paths=[];self.import_lock=threading.Lock()
         self.session=requests.Session();self.session.trust_env=False;self.session.mount('https://',PinnedAdapter(trust['fingerprint']))
-        self.lan_url=self.url;self.vpn_url=None;self.connection_mode='lan';self.last_lan_probe=0.
+        self.preference=self.state.get('connection_preference','auto')
+        if self.preference not in ('auto','lan','vpn'):self.preference='auto'
+        self.lan_url=self.url;self.vpn_url=None;self.connection_mode='lan' if self.url else None;self.last_lan_probe=0.
+        if self.preference=='vpn':self.url=None;self.connection_mode=None
         from .remote_access import RemoteAccess
         self.vpn=RemoteAccess(self.home/'vpn',trust,device=self.state['device_id'],on_remote=self.remote_found)
+    def transport(self):
+        with self.lock:return dict(preference=self.preference,transport=self.connection_mode,host_url=self.url,host_found=bool(self.url))
+    def select_transport(self,mode):
+        if mode not in ('auto','lan','vpn'):raise ValueError('Неизвестный способ подключения')
+        with self.lock:
+            self.preference=mode;self.state['connection_preference']=mode;secure_store.write(self.path,self.state)
+            self.url=None;self.connection_mode=None;self.last_lan_probe=0;lan=self.lan_url;vpn=self.vpn_url
+        if mode=='vpn' and not self.vpn.config['enabled']:self.vpn.configure({**self.vpn.config,'enabled':True})
+        if mode in ('auto','lan') and lan:self.found(lan)
+        if mode!='lan' and vpn:self.remote_found(vpn)
+        return self.transport()
     def remote_found(self,url):
         with self.lock:
-            previous=self.vpn_url;self.vpn_url=url;lan=self.lan_url;current=self.url
+            previous=self.vpn_url;self.vpn_url=url;lan=self.lan_url;current=self.url;mode=self.preference
         if not url:
             with self.lock:
-                if self.url==previous:self.url=lan;self.connection_mode='lan'
+                if self.url==previous:
+                    self.url=lan if self.preference!='vpn' else None;self.connection_mode='lan' if self.url else None
             return
-        if lan and current==lan and time_since(self.last_lan_probe)<10:return
+        if mode=='lan':return
+        if mode=='auto' and lan and current==lan and time_since(self.last_lan_probe)<10:return
         self.last_lan_probe=__import__('time').monotonic()
-        if lan:
+        if mode=='auto' and lan:
             try:
                 reply=self.session.get(lan+'/api/host-info',timeout=1,allow_redirects=False)
                 if reply.ok and reply.json().get('host_id')==self.trust['host_id']:
-                    with self.lock:self.url=lan;self.connection_mode='lan'
+                    with self.lock:
+                        if self.preference!='vpn':self.url=lan;self.connection_mode='lan'
                     return
             except (requests.RequestException,ValueError):pass
         try:
             reply=self.session.get(url+'/api/host-info',timeout=2,allow_redirects=False)
             if reply.ok and reply.json().get('host_id')==self.trust['host_id']:
-                with self.lock:self.url=url;self.connection_mode='vpn'
+                with self.lock:
+                    if self.preference!='lan':self.url=url;self.connection_mode='vpn'
         except (requests.RequestException,ValueError):pass
     def found(self,url):
         if not is_local(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit(url).hostname):return
         try:
             response=self.session.get(url+'/api/host-info',timeout=2)
             if response.ok and response.json().get('host_id')==self.trust['host_id']:
-                with self.lock:self.url=url;self.lan_url=url;self.connection_mode='lan';self.state['host_url']=url;secure_store.write(self.path,self.state)
+                with self.lock:
+                    self.lan_url=url;self.state['host_url']=url;secure_store.write(self.path,self.state)
+                    if self.preference!='vpn':self.url=url;self.connection_mode='lan'
                 if self.state.get('token'):self.import_legacy()
         except requests.RequestException:pass
     def request(self,path,method='GET',body=b'',content_type='application/json'):
         with self.lock:url=self.url;token=self.state.get('token')
-        if not url:raise ConnectionError('Ищем хост в локальной сети. Проверьте, что программа хоста запущена.')
+        if not url:raise ConnectionError('Ожидаем хост по выбранному способу подключения. Проверьте настройки сети и VPN.')
         headers={'Content-Type':content_type}
         if token:headers['Authorization']='Bearer '+token
         payload=None
@@ -152,7 +172,8 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
             if not self.valid():return self.send({'error':'Недопустимый адрес'},403)
             path=__import__('urllib.parse',fromlist=['urlsplit']).urlsplit(self.path).path
             if path=='/api/events':return self.stream_events()
-            if path=='/api/connection':return self.send(dict(host_found=bool(agent.url),host_url=agent.url,transport=agent.connection_mode,csrf=agent.csrf,profile=agent.state.get('profile'),computer=agent.state['computer_name']))
+            if path=='/api/connection':return self.send(dict(**agent.transport(),csrf=agent.csrf,profile=agent.state.get('profile'),computer=agent.state['computer_name']))
+            if path=='/api/client/transport':return self.send(agent.transport())
             if path=='/api/client/vpn/status':return self.send(agent.vpn.status())
             if path=='/api/client/update/status':
                 from .daily_updates import local_status
@@ -190,6 +211,7 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
                 length=int(self.headers.get('Content-Length','0'))
                 if length<0 or length>5*1024*1024:return self.send({'error':'Слишком большой запрос'},413)
                 body=self.rfile.read(length)
+                if self.path=='/api/client/transport':return self.send(agent.select_transport(json.loads(body)['mode']))
                 if self.path=='/api/client/vpn/config':return self.send(agent.vpn.configure(json.loads(body)))
                 if self.path=='/api/client/vpn/login':return self.send(agent.vpn.login())
                 if self.path=='/api/client/update/check':

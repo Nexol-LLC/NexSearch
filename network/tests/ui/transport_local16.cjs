@@ -1,0 +1,31 @@
+/* Verify strict transport selection against the running compiled local host. */
+const assert=require('node:assert/strict'),path=require('node:path'),fs=require('node:fs/promises');
+const {_electron}=require('playwright');
+const root=path.resolve(__dirname,'../../..'),out=path.join(root,'preview/qa16-transport');let app;
+(async()=>{
+ await fs.mkdir(out,{recursive:true});const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+ app=await _electron.launch({executablePath:path.join(root,'preview/HostWindows/desktop/runtime/electron.exe'),args:[path.join(root,'desktop/app'),'--url=http://127.0.0.1:8765','--profile='+out,'--hidden'],env});
+ const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.waitForSelector('#workspace:not([hidden])',{timeout:30000});
+ await page.waitForFunction(()=>document.querySelector('.topbar [data-transport16]')&&!document.querySelector('.topbar [data-transport16]').disabled);
+ const initial=await page.evaluate(()=>api('/api/connection'));
+ await page.locator('.topbar [data-transport16]').selectOption('vpn');
+ await page.waitForSelector('#transport-panel16 [data-transport16]');
+ await page.waitForFunction(()=>!document.querySelector('#transport-panel16 [data-transport16]').disabled);
+ const forced=await page.evaluate(()=>api('/api/client/transport'));
+ assert.equal(forced.preference,'vpn');assert.equal(forced.host_found,false);assert.equal(forced.host_url,null);
+ assert.equal(await page.evaluate(async()=>{try{await api('/api/state');return 200}catch(e){return e.status}}),503);
+ await page.waitForSelector('#vpn-login16:not([hidden])',{timeout:35000});
+ await page.screenshot({path:path.join(out,'forced-vpn-awaits-authorization.png'),animations:'disabled'});
+ await page.locator('#transport-panel16 [data-transport16]').selectOption('lan');
+ await page.waitForFunction(()=>!document.querySelector('#transport-panel16 [data-transport16]').disabled);
+ await page.waitForFunction(()=>document.querySelector('#transport-panel16 [data-transport16]').value==='lan');
+ const restored=await page.evaluate(()=>api('/api/client/transport'));
+ assert.equal(restored.transport,'lan');assert.equal(restored.host_url,initial.host_url);
+ assert.equal(await page.evaluate(async()=>{await api('/api/state');return 200}),200);
+ await page.evaluate(()=>closeEditor());
+ assert.deepEqual(errors,[]);
+ await page.screenshot({path:path.join(out,'local-network-restored.png'),animations:'disabled'});
+ await fs.writeFile(path.join(out,'result.json'),JSON.stringify({passed:true,forced_vpn_does_not_use_lan:true,local_connection_restored:true,authorization_required:true,errors},null,2));
+ console.log('Compiled local host: forced VPN refuses healthy LAN, native enrollment link available, switching back restores LAN. No JS errors.');
+})().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{if(app){try{const page=await app.firstWindow();await page.evaluate(()=>api('/api/client/transport',{method:'POST',body:JSON.stringify({mode:'lan'})}))}catch{}await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}});

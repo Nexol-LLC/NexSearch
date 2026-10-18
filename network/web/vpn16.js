@@ -55,3 +55,16 @@ async function showVpnSetup16(existing=false){
  await update();hostSettingsTimer=setInterval(()=>{if(!current()){clearInterval(hostSettingsTimer);return}update()},2000);
 }
 const selectSettingsBeforeVpn16=selectSettingsTab;selectSettingsTab=tab=>{$('#settings-vpn-tab16')?.classList.remove('primary');selectSettingsBeforeVpn16(tab)};
+
+// A forced VPN never falls back to LAN, including while waiting for enrollment.
+let transportRevision16=0,transportBusy16=false,transportState16=null;
+const transportOptions16='<option value="auto">Автоматически</option><option value="lan">Локальная сеть</option><option value="vpn">VPN</option>';
+function transportControl16(){const label=document.createElement('label');label.className='transport-choice16';label.innerHTML='<span>Подключение</span><select data-transport16 aria-label="Способ подключения">'+transportOptions16+'</select>';label.querySelector('select').onchange=event=>changeTransport16(event.target.value);return label}
+const transportTop16=transportControl16(),transportAuth16=transportControl16();
+$('.topbar').insertBefore(transportTop16,$('.connection-state'));vpnAuth16.prepend(transportAuth16);
+window.nexConnectionLabel16=()=>transportState16?.preference==='vpn'&&transportState16.transport!=='vpn'?'Ожидаем VPN':transportState16?.transport==='vpn'?'Хост подключён · VPN':'Хост подключён · Локальная сеть';
+function paintTransport16(state){transportState16=state;for(const select of $$('[data-transport16]')){select.value=state.preference||'auto';select.disabled=transportBusy16}const help=$('#transport-help16');if(help)help.textContent=state.preference==='vpn'?'Только VPN. Локальное соединение не используется, даже если хост рядом.':state.preference==='lan'?'Только локальная сеть. Подключение к хосту через VPN не используется.':'В офисе используется локальная сеть, вне офиса — VPN.';if(user&&state.preference==='vpn'&&!state.host_found)$('#host-state').textContent='Ожидаем VPN';}
+async function refreshTransport16(){const revision=transportRevision16;try{const state=await api('/api/client/transport');if(revision!==transportRevision16)return;paintTransport16(state);transportTop16.hidden=transportAuth16.hidden=false}catch{transportTop16.hidden=transportAuth16.hidden=true}}
+async function changeTransport16(mode){if(transportBusy16)return;transportBusy16=true;++transportRevision16;for(const select of $$('[data-transport16]'))select.disabled=true;try{paintTransport16(await api('/api/client/transport',{method:'POST',body:JSON.stringify({mode})}));if(mode==='vpn'){if(!user)await refreshVpnAuth16();else await showVpnSetup16()}}catch(error){if(user)notice(error.message,true);else $('#vpn-auth-status16').textContent=error.message}finally{transportBusy16=false;await refreshTransport16()}}
+const vpnSetupBeforeTransport16=showVpnSetup16;showVpnSetup16=async existing=>{await vpnSetupBeforeTransport16(existing);const area=$('#host-settings-content');if(!area||settingsTab!=='vpn')return;const panel=document.createElement('section');panel.className='vpn-panel16';panel.id='transport-panel16';panel.append(transportControl16());const hint=document.createElement('p');hint.id='transport-help16';hint.className='muted';panel.append(hint);area.prepend(panel);if(transportState16)paintTransport16(transportState16);refreshTransport16()};
+setInterval(refreshTransport16,3000);refreshTransport16();

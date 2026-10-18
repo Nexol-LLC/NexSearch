@@ -102,7 +102,30 @@ def test_bridge_vpn_mutations_require_origin_and_csrf(tmp_path):
         assert requests.post(endpoint,json=body).status_code==403
         assert requests.post(endpoint,json=body,headers={'Origin':'https://evil.example','X-Nexol-CSRF':agent.csrf}).status_code==403
         assert requests.post(endpoint,json=body,headers={'Origin':url,'X-Nexol-CSRF':agent.csrf}).status_code==200
+        endpoint=url+'/api/client/transport'
+        assert requests.post(endpoint,json={'mode':'lan'}).status_code==403
+        assert requests.post(endpoint,json={'mode':'unknown'},headers={'Origin':url,'X-Nexol-CSRF':agent.csrf}).status_code==400
+        assert requests.post(endpoint,json={'mode':'lan'},headers={'Origin':url,'X-Nexol-CSRF':agent.csrf}).json()['preference']=='lan'
     finally:server.shutdown();close();thread.join(5)
+
+def test_forced_vpn_cannot_fall_back_to_healthy_lan_and_choice_survives_restart(tmp_path):
+    agent=EmployeeAgent(TRUST,tmp_path,profile={'host_url':'https://192.168.0.102:8743'})
+    agent.vpn.config['enabled']=True  # No real external enrollment in unit tests.
+    agent.session.get=lambda *args,**kw:SimpleNamespace(ok=True,json=lambda:{'host_id':TRUST['host_id']})
+    try:
+        state=agent.select_transport('vpn');assert state['preference']=='vpn' and not state['host_found']
+        with pytest.raises(ConnectionError):agent.request('/api/state')
+        agent.found(agent.lan_url);assert agent.url is None
+        agent.remote_found('https://127.0.0.1:4200');assert agent.url=='https://127.0.0.1:4200'
+        agent.found(agent.lan_url);assert agent.connection_mode=='vpn'
+        restarted=EmployeeAgent(TRUST,tmp_path)
+        assert restarted.preference=='vpn' and restarted.url is None
+        restarted.vpn.close();restarted.session.close()
+        agent.remote_found(None);assert agent.url is None
+        assert agent.select_transport('lan')['transport']=='lan'
+        agent.remote_found('https://127.0.0.1:4200');assert agent.url==agent.lan_url
+        assert secure_store.read(agent.path)['connection_preference']=='lan'
+    finally:agent.vpn.close();agent.session.close()
 
 def test_only_director_can_enroll_office_host(db,tmp_path):
     a,b,manager,director,outside=staff(db);api=http(db)
