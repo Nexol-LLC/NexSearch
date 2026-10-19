@@ -112,20 +112,26 @@ def test_due_reminders_are_persistent_deduplicated_and_private(db):
 def fake_mail(monkeypatch,tmp_path):
     key=tmp_path/'host-key.pem';key.write_bytes(b'test-only-private-key')
     monkeypatch.setenv('NEXSEARCH_KEY_FILE',str(key))
-    state={'messages':{},'sent':[],'seen':set(),'validity':b'7'}
+    state={'messages':{},'sent':[],'seen':set(),'validity':b'7','folders':['INBOX','Sent'],'created':[],'moved':[]}
     class FakeIMAP:
+        capabilities=(b'IMAP4rev1',b'MOVE')
         def __init__(self,*args,**kwargs):self.folder='INBOX'
         def login(self,login,password):
             if password!='app-password':raise imaplib.IMAP4.error('private-password-in-error')
             return 'OK',[]
         def logout(self):return 'OK',[]
-        def list(self):return 'OK',[b'(\\HasNoChildren) "/" "INBOX"',b'(\\Sent) "/" "Sent"']
+        def list(self):return 'OK',[(b'(\\Sent)' if f=='Sent' else b'(\\HasNoChildren)')+b' "/" "'+f.encode('ascii')+b'"' for f in state['folders']]
+        def create(self,folder):
+            raw=folder.strip('"');state['created'].append(raw);state['folders'].append(raw);return 'OK',[]
+        def subscribe(self,folder):return 'OK',[]
         def select(self,folder,readonly=True):self.folder=folder.strip('"');return 'OK',[b'1']
         def response(self,_):return 'UIDVALIDITY',[state['validity']]
         def uid(self,command,*args):
             if command=='search':return 'OK',[b' '.join(str(i).encode() for i in sorted(state['messages']))]
             if command=='store':
-                uid=int(args[0]);state['seen'].add(uid) if args[1].startswith('+') else state['seen'].discard(uid);return 'OK',[]
+                for uid in map(int,args[0].split(',')):state['seen'].add(uid) if args[1].startswith('+') else state['seen'].discard(uid)
+                return 'OK',[]
+            if command=='MOVE':state['moved'].append(args);state['messages'].pop(int(args[0]),None);return 'OK',[]
             data=[]
             for uid in map(int,args[0].split(',')):
                 if uid not in state['messages']:continue

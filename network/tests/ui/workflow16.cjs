@@ -11,7 +11,7 @@ let app;
  let page=await app.firstWindow();const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await app.evaluate(({BrowserWindow})=>{for(const w of BrowserWindow.getAllWindows()){w.webContents.setBackgroundThrottling(false);w.showInactive()}});
  await page.waitForSelector('#workspace:not([hidden])',{timeout:30000});
- assert.equal(await page.locator('.brand small').innerText(),'версия 1.6.0');
+ assert.equal(await page.locator('.brand small').innerText(),'версия 1.6.1');
  await page.click('[data-view="clients"]');await page.waitForSelector('#kanban:not([hidden]) .kanban-card');
  assert((await page.locator('#kanban').innerText()).includes('МСК+1'));
  await page.click('[data-view="carriers"]');await page.waitForSelector('[data-carrier15]');
@@ -42,7 +42,7 @@ let app;
  await page.click('#close-editor');
  console.log('Company card actions, contact editing, timezone, task creation and INN lookup: passed.');
  await page.click('[data-view="mail"]');await page.waitForSelector('#mail-items16 [data-mail-id16]');
- await page.locator('#mail-items16 [data-mail-id16]').first().click();await page.waitForSelector('#mail-reader16 .mail-body-text16');
+ await page.locator('#mail-items16 [data-mail-id16]').first().click();await page.waitForSelector('#mail-reader16 iframe');await page.click('[data-mail-format16="text"]');await page.waitForSelector('#mail-reader16 .mail-body-text16');
  assert((await page.locator('#mail-reader16').innerText()).includes('Самара — Москва'));
  await page.screenshot({path:path.join(out,'mail.png'),animations:'disabled'});
  await page.click('#mail-reply16');await page.waitForSelector('#compose-to16');
@@ -76,7 +76,7 @@ let app;
  await page.locator('[data-alert16]').filter({hasText:'Задача от руководителя 1.6'}).first().click();
  await page.waitForSelector('#task-title');assert.equal(await page.inputValue('#task-title'),'Задача от руководителя 1.6');
  assert.deepEqual(errors,[]);console.log('Manager delegation and employee notification deep link: passed. No JavaScript errors.');
- await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.0',passed:true,errors,screenshots:['company-card.png','mail.png','notifications.png','manager-tasks.png']},null,2));
+ await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.1',passed:true,errors,screenshots:['company-card.png','mail.png','notifications.png','manager-tasks.png']},null,2));
 })().catch(async error=>{console.error(error);if(app){const page=await app.firstWindow();await page.screenshot({path:path.join(out,'failure.png')});console.error(await page.evaluate(()=>({view,nav,workspaceOwner,taskNew:!!$('#task-new'),scope:!!$('#task-scope16'),operationsHidden:$('#operations-view').hidden,title:$('#page-heading').textContent}))) }process.exitCode=1}).finally(async()=>{
  if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}
 });

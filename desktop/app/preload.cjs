@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('NexDesktop',Object.freeze({
  prepareUpdate:()=>ipcRenderer.invoke('update:prepare'),applyUpdate:state=>ipcRenderer.invoke('update:apply',state),
  exportPdf:(html,name)=>ipcRenderer.invoke('document:pdf',html,name),
  exportXlsx:(bytes,name)=>ipcRenderer.invoke('document:xlsx',bytes,name),
+ saveFile:(bytes,name)=>ipcRenderer.invoke('document:file',bytes,name),
  copy:text=>ipcRenderer.invoke('clipboard:write',text),
  quit:()=>ipcRenderer.invoke('application:quit')
 }));

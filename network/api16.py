@@ -64,6 +64,29 @@ class MailSync(Input):
     folder:str=Field(default='INBOX',min_length=1,max_length=512)
     before_uid:int|None=Field(default=None,ge=1)
 class Seen(Input):seen:bool=True
+class MailSettings(Input):
+    label:str=Field(default='',max_length=100)
+    login:str=Field(min_length=1,max_length=254)
+    password:str|None=Field(default=None,max_length=512)
+    imap_host:str=Field(min_length=1,max_length=253)
+    smtp_host:str=Field(default='',max_length=253)
+    read_mode:Literal['auto','text','html']='auto'
+    signature:str=Field(default='',max_length=10000)
+    notifications:bool=True
+    sync_folders:list[str]=Field(default_factory=lambda:['INBOX'],min_length=1,max_length=100)
+    @field_validator('imap_host','smtp_host')
+    @classmethod
+    def hosts(cls,value):return MailAccount.hostname(value)
+    @field_validator('login','password')
+    @classmethod
+    def credentials(cls,value):return MailAccount.no_controls(value) if value is not None else None
+class MailFolder(Input):
+    name:str=Field(min_length=1,max_length=100)
+    parent:str=Field(default='',max_length=512)
+class MailMarkMany(Input):
+    ids:list[UUID]=Field(min_length=1,max_length=500)
+    seen:bool=True
+class MailMove(Input):folder:str=Field(min_length=1,max_length=512)
 class SendMail(Input):
     account_id:UUID
     to:list[str]=Field(min_length=1,max_length=30)
@@ -211,8 +234,19 @@ def create_app(*args,**kwargs):
 
     @app.get('/api/mail/accounts')
     def mail_accounts(user=Depends(employee)):
-        with db.transaction(user['id']) as c:items=c.execute('SELECT '+ACCOUNT_FIELDS+' FROM mail_accounts WHERE employee_id=%s ORDER BY created_at',(user['id'],)).fetchall()
+        with db.transaction(user['id']) as c:
+            items=c.execute('SELECT '+ACCOUNT_FIELDS+' FROM mail_accounts WHERE employee_id=%s ORDER BY created_at',(user['id'],)).fetchall()
+            counts=c.execute('SELECT account_id,folder,count(*) AS total,count(*) FILTER (WHERE NOT seen) AS unread FROM mail_messages WHERE employee_id=%s GROUP BY account_id,folder',(user['id'],)).fetchall()
+        for item in items:item['folder_counts']={r['folder']:{'total':r['total'],'unread':r['unread']} for r in counts if r['account_id']==item['id']}
         return {'accounts':items}
+    @app.patch('/api/mail/accounts/{ident}/settings')
+    def mail_settings(ident:UUID,body:MailSettings,user=Depends(employee)):return mail.settings(user['id'],ident,body)
+    @app.post('/api/mail/accounts/{ident}/folders')
+    def mail_folder(ident:UUID,body:MailFolder,user=Depends(employee)):return mail.create_folder(user['id'],ident,body.name,body.parent)
+    @app.post('/api/mail/accounts/{ident}/mark')
+    def mail_mark_many(ident:UUID,body:MailMarkMany,user=Depends(employee)):return mail.mark_many(user['id'],ident,body.ids,body.seen)
+    @app.post('/api/mail/messages/{ident}/move')
+    def move_message(ident:UUID,body:MailMove,user=Depends(employee)):return mail.move(user['id'],ident,body.folder)
     @app.post('/api/mail/accounts')
     def connect_mail(body:MailAccount,user=Depends(employee)):
         if not body.imap_host:raise ValueError('Укажите IMAP сервер')
@@ -240,7 +274,7 @@ def create_app(*args,**kwargs):
         return sorted(set(a.strip().lower() for a in addresses if a and '@' in a))
 
     @app.get('/api/mail/messages')
-    def messages(account_id:UUID|None=None,folder:str='INBOX',company_id:UUID|None=None,q:str='',before:datetime|None=None,before_uid:int|None=None,user=Depends(employee)):
+    def messages(account_id:UUID|None=None,folder:str='INBOX',company_id:UUID|None=None,q:str='',before:datetime|None=None,before_uid:int|None=None,unread:bool=False,limit:int=100,user=Depends(employee)):
         where='employee_id=%s';params=[user['id']]
         with db.transaction(user['id']) as c:
             if company_id:
@@ -251,10 +285,11 @@ def create_app(*args,**kwargs):
                 where+=' AND folder=%s';params.append(folder)
             if q:
                 where+=' AND (subject ILIKE %s OR sender ILIKE %s OR body_text ILIKE %s)';params += ['%'+q[:200]+'%']*3
+            if unread:where+=' AND NOT seen'
             if before:where+=' AND COALESCE(sent_at,cached_at)<%s';params.append(before)
             if before_uid is not None and account_id and not company_id:where+=' AND uid<%s';params.append(before_uid)
             ordering='uid DESC' if account_id and not company_id else 'COALESCE(sent_at,cached_at) DESC,id'
-            items=c.execute('SELECT '+MESSAGE_FIELDS+' FROM mail_messages WHERE '+where+' ORDER BY '+ordering+' LIMIT 100',params).fetchall()
+            items=c.execute('SELECT '+MESSAGE_FIELDS+' FROM mail_messages WHERE '+where+' ORDER BY '+ordering+' LIMIT %s',params+[max(1,min(500,limit))]).fetchall()
         return {'messages':items}
     @app.get('/api/mail/messages/{ident}')
     def read_message(ident:UUID,user=Depends(employee)):return mail.read(user['id'],ident)

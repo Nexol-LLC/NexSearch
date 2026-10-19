@@ -17,6 +17,6 @@ def main():
  port=int(os.environ.get('NEXOL_HOST_PORT','8743'));discovery=HostDiscovery(trust,port,db);broadcast=HostBroadcast(trust,port)
  from .remote_access import RemoteAccess
  remote=app.state.remote_access=RemoteAccess(home/'vpn-host',trust,mode='host',port=port);remote.start()
- try:uvicorn.run(app,host='0.0.0.0',port=port,ssl_certfile=str(cert),ssl_keyfile=str(key),access_log=False)
+ try:uvicorn.run(app,host='0.0.0.0',port=port,ssl_certfile=str(cert),ssl_keyfile=str(key),access_log=False,timeout_graceful_shutdown=10)
  finally:remote.close();broadcast.close();discovery.close();db.close()
 if __name__=='__main__':main()

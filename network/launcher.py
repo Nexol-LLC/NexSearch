@@ -117,7 +117,7 @@ def run_host():
         port=int(os.environ.get('NEXOL_HOST_PORT','8743'))
         from .remote_access import RemoteAccess
         remote=app.state.remote_access=RemoteAccess(home/'vpn-host',trust,mode='host',port=port);remote.start()
-        server=uvicorn.Server(uvicorn.Config(app,host='0.0.0.0',port=port,ssl_certfile=str(cert),ssl_keyfile=str(key),log_config=None,access_log=False))
+        server=uvicorn.Server(uvicorn.Config(app,host='0.0.0.0',port=port,ssl_certfile=str(cert),ssl_keyfile=str(key),log_config=None,access_log=False,timeout_graceful_shutdown=10))
         thread=threading.Thread(target=server.run,daemon=True);thread.start()
         for _ in range(300):
             if server.started:break
@@ -130,12 +130,15 @@ def run_host():
         instance.ready(bridge.server_port);open_window(f'http://127.0.0.1:{bridge.server_port}/',home,program_dir(),'host');bridge.serve_forever()
     except Exception:show_error(home);raise
     finally:
+        if db:db.events.close()
         if remote:remote.close()
         if discovery:discovery.close()
+        # Close this host's local HTTP client before waiting for TLS shutdown.
+        # Otherwise its pooled HTTPS connections can hold the server open.
+        if bridge_close:bridge_close();bridge_close=None
         if server:
             server.should_exit=True
             thread.join(timeout=60)
-        if bridge_close:bridge_close()
         if db:db.close()
         if pg_started:stop_postgres(home,runtime)
         instance.close()

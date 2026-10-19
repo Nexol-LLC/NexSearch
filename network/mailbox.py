@@ -10,6 +10,7 @@ import smtplib
 import socket
 import ssl
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -26,9 +27,10 @@ from psycopg.types.json import Jsonb
 from .database import NotFound, Conflict
 from .host_secrets import key_path
 from .notifications import notify
+from .mail_html import sanitize_html,raster_uri
 
 MAX_MESSAGE=15*1024*1024
-ACCOUNT_FIELDS='id,email,login,label,imap_host,imap_port,smtp_host,smtp_port,enabled,folders,last_sync_at,last_error'
+ACCOUNT_FIELDS='id,email,login,label,imap_host,imap_port,smtp_host,smtp_port,enabled,folders,settings,last_sync_at,last_error'
 MESSAGE_FIELDS='id,account_id,folder,uid,subject,sender,recipients,addresses,sent_at,seen,size_bytes,message_id'
 
 class MailError(ValueError):pass
@@ -87,16 +89,17 @@ def folders_from_list(lines):
     result=[]
     for line in lines or []:
         if not isinstance(line,bytes):continue
-        match=re.match(rb'\(([^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(.+)$',line)
+        match=re.match(rb'\(([^)]*)\)\s+("(?:[^"\\]|\\.)*"|NIL)\s+(.+)$',line)
         if not match:continue
         flags=match[1].decode('ascii','ignore').lower()
         if '\\noselect' in flags:continue
-        raw=match[2].decode('ascii','replace')
+        delimiter=match[2].decode('ascii').strip('"') if match[2]!=b'NIL' else None
+        raw=match[3].decode('ascii','replace')
         if raw.startswith('"') and raw.endswith('"'):raw=re.sub(r'\\(.)',r'\1',raw[1:-1])
         if len(raw)>512 or any(ord(c)<32 for c in raw):continue
         display=folder_name(raw)
         sent='\\sent' in flags or display.casefold() in ('sent','sent items','sent messages','отправленные')
-        result.append({'id':raw,'name':display,'sent':sent})
+        result.append({'id':raw,'name':display,'sent':sent,'delimiter':delimiter,'quiet':sent or any(flag in flags for flag in ('\\drafts','\\trash','\\junk'))})
     if not any(f['id'].upper()=='INBOX' for f in result):result.insert(0,{'id':'INBOX','name':'Входящие','sent':False})
     return result[:100]
 
@@ -136,6 +139,32 @@ def content(message):
         parser=TextHTML();parser.feed('\n'.join(html));body=''.join(parser.parts)
     return body[:1_000_000],attachments
 
+def rich_content(message):
+    text,attachments=content(message);html=[];inline={}
+    for part in message.walk():
+        if part.is_multipart():continue
+        cid=str(part.get('Content-ID','')).strip('<>')
+        if cid and part.get_content_type().startswith('image/'):
+            image=raster_uri(part.get_payload(decode=True) or b'',part.get_content_type())
+            if image:inline[cid]=image
+        if part.get_content_type()=='text/html' and part.get_content_disposition()!='attachment' and not part.get_filename():
+            try:html.append(str(part.get_content()))
+            except (LookupError,UnicodeError):html.append((part.get_payload(decode=True) or b'').decode('utf-8','replace'))
+    return text,sanitize_html('\n'.join(html),inline) if html else '',attachments
+
+def encode_folder(value):
+    result=[];run=[]
+    def flush():
+        if run:result.append('&'+base64.b64encode(''.join(run).encode('utf-16-be')).decode().rstrip('=').replace('/',',')+'-');run.clear()
+    for char in value:
+        if 32<=ord(char)<=126:flush();result.append('&-' if char=='&' else char)
+        else:run.append(char)
+    flush();return ''.join(result)
+
+def quoted_folder(value):
+    if not value or len(value)>512 or any(ord(c)<32 or ord(c)>126 for c in value):raise MailError('Недопустимая папка')
+    return '"'+value.replace('\\','\\\\').replace('"','\\"')+'"'
+
 def headers(raw,metadata):
     message=BytesParser(policy=policy.default).parsebytes(raw,headersonly=True)
     senders=getaddresses(message.get_all('from',[]));recipients=getaddresses(message.get_all('to',[])+message.get_all('cc',[]))
@@ -150,6 +179,7 @@ class Mailbox:
     def __init__(self,db):
         self.db=db;self.stopping=threading.Event();self.thread=None
         self.locks=[threading.Lock() for _ in range(64)];self.slots=threading.BoundedSemaphore(3)
+        self.pool=None;self.inflight={};self.next_due={}
 
     @contextmanager
     def connection(self,account):
@@ -231,7 +261,8 @@ class Mailbox:
                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                   ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET seen=excluded.seen
                   RETURNING id''',(uuid4(),owner,ident,folder,validity,uid,item['subject'],item['sender'],Jsonb(item['recipients']),item['addresses'],item['sent_at'],item['seen'],item['size_bytes'],item['message_id'])).fetchone()
-                if not initial and folder.upper()=='INBOX' and uid>highest and not item['seen']:
+                folder_info=next((f for f in folders if f['id']==folder),{})
+                if not initial and not folder_info.get('quiet',folder_info.get('sent',False)) and (account.get('settings') or {}).get('notifications',True) and uid>highest and not item['seen']:
                     notify(c,owner,'mail.new',item['subject'],item['sender'],row['id'],f'mail:{ident}:{folder}:{validity}:{uid}')
             state={**(account['sync_state'] or {}),folder:{'uidvalidity':validity,'last_uid':max(uids,default=highest)}}
             c.execute("UPDATE mail_accounts SET folders=%s,sync_state=%s,last_sync_at=now(),last_error='' WHERE id=%s AND employee_id=%s",(Jsonb(folders),Jsonb(state),ident,owner))
@@ -258,22 +289,24 @@ class Mailbox:
 
     def read(self,owner,ident):
         row=self.message(owner,ident)
-        if row['body_text'] is None:
-            body,attachments=content(self.raw_message(owner,row))
-            with self.db.transaction(owner) as c:c.execute('UPDATE mail_messages SET body_text=%s,attachments=%s WHERE id=%s AND employee_id=%s',(body,Jsonb(attachments),ident,owner))
-            row['body_text']=body;row['attachments']=attachments
-        if not row['seen']:self.mark(owner,ident,True)
-        return {**{k:v for k,v in row.items() if k not in ('employee_id','uid','uidvalidity')},'seen':True}
+        warning=''
+        if row['body_text'] is None or row['content_version']<1:
+            try:
+                body,html,attachments=rich_content(self.raw_message(owner,row))
+                with self.db.transaction(owner) as c:c.execute('UPDATE mail_messages SET body_text=%s,body_html=%s,content_version=1,attachments=%s WHERE id=%s AND employee_id=%s',(body,html,Jsonb(attachments),ident,owner))
+                row.update(body_text=body,body_html=html,attachments=attachments,content_version=1)
+            except MailError:
+                if row['body_text'] is None:raise
+                warning='Почтовый сервер недоступен. Показана сохранённая текстовая версия.'
+        if not row['seen']:
+            try:self.mark(owner,ident,True);row['seen']=True
+            except (MailError,Conflict):warning=warning or 'Письмо открыто, но отметку прочтения не удалось синхронизировать. Повторите позже.'
+        account=self.account(owner,row['account_id'])
+        return {**{k:v for k,v in row.items() if k not in ('employee_id','uid','uidvalidity')},'warning':warning,'read_mode':(account.get('settings') or {}).get('read_mode','auto')}
 
     def mark(self,owner,ident,seen):
-        row=self.message(owner,ident);account=self.account(owner,row['account_id'])
-        with self.connection(account) as client:
-            if select_folder(client,row['folder'],False)!=row['uidvalidity']:raise Conflict('Синхронизируйте папку заново')
-            status,_=client.uid('store',str(row['uid']),'+FLAGS.SILENT' if seen else '-FLAGS.SILENT','(\\Seen)')
-            if status!='OK':raise MailError('Не удалось изменить отметку прочтения')
-        with self.db.transaction(owner) as c:
-            c.execute('UPDATE mail_messages SET seen=%s WHERE id=%s AND employee_id=%s',(seen,ident,owner))
-            if seen:c.execute("UPDATE notifications SET read_at=COALESCE(read_at,now()) WHERE employee_id=%s AND kind='mail.new' AND entity_id=%s",(owner,str(ident)))
+        row=self.message(owner,ident)
+        return self.mark_many(owner,row['account_id'],[ident],seen)
 
     def attachment(self,owner,ident,index):
         row=self.message(owner,ident);message=self.raw_message(owner,row)
@@ -282,6 +315,107 @@ class Mailbox:
         part=parts[index]
         if not part.get_filename() and part.get_content_disposition()!='attachment':raise NotFound('Вложение не найдено')
         return str(part.get_filename() or 'attachment'),part.get_payload(decode=True) or b''
+
+    def settings(self,owner,ident,body):
+        lock=self.locks[hash(str(ident))%len(self.locks)]
+        if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
+        try:return self._settings(owner,ident,body)
+        finally:lock.release()
+
+    def _settings(self,owner,ident,body):
+        old=self.account(owner,ident);changed=any(getattr(body,k)!=old[k] for k in ('login','imap_host','smtp_host')) or bool(body.password)
+        updated={**old,'login':body.login,'imap_host':body.imap_host,'smtp_host':body.smtp_host}
+        if body.password:updated['secret']=seal(body.password,owner,ident)
+        folders=old['folders']
+        if changed:
+            with self.connection(updated) as client:
+                status,lines=client.list()
+                if status!='OK':raise MailError('Не удалось проверить папки почты')
+                folders=folders_from_list(lines)
+        if not set(body.sync_folders)<={f['id'] for f in folders}:raise MailError('Обновите список папок и выберите доступные папки')
+        settings={'read_mode':body.read_mode,'signature':body.signature,'notifications':body.notifications,'sync_folders':list(dict.fromkeys(body.sync_folders))}
+        with self.db.transaction(owner) as c:
+            c.execute('''UPDATE mail_accounts SET label=%s,login=%s,imap_host=%s,smtp_host=%s,secret=%s,settings=%s,folders=%s,last_error=''
+              WHERE id=%s AND employee_id=%s''',(body.label,body.login,body.imap_host,body.smtp_host,updated['secret'],Jsonb(settings),Jsonb(folders),ident,owner))
+            # A different IMAP server may reuse UIDVALIDITY and UID numbers.
+            if updated['imap_host']!=old['imap_host'] or updated['login']!=old['login']:
+                c.execute('DELETE FROM mail_messages WHERE account_id=%s AND employee_id=%s',(ident,owner))
+                c.execute("UPDATE mail_accounts SET sync_state='{}',last_sync_at=NULL WHERE id=%s AND employee_id=%s",(ident,owner))
+        self.db.audit(owner,'mail.settings',ident,{'credentials_changed':changed,'read_mode':body.read_mode})
+        self.db.events.publish(owner,'mail.settings');return {'saved':True}
+
+    def create_folder(self,owner,ident,name,parent=''):
+        account=self.account(owner,ident);name=name.strip()
+        if not name or len(name)>100 or any(ord(c)<32 for c in name):raise MailError('Укажите название папки до 100 символов')
+        lock=self.locks[hash(str(ident))%len(self.locks)]
+        if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
+        try:
+            with self.connection(account) as client:
+                status,lines=client.list()
+                if status!='OK':raise MailError('Не удалось получить папки')
+                folders=folders_from_list(lines);parent_info=next((f for f in folders if f['id']==parent),None)
+                if parent and not parent_info:raise MailError('Родительская папка недоступна')
+                delimiter=(parent_info or next(iter(folders),{})).get('delimiter','/')
+                if parent and not delimiter:raise MailError('Этот сервер не поддерживает вложенные папки')
+                if delimiter and delimiter in name:raise MailError('В названии нельзя использовать разделитель '+delimiter)
+                raw=(parent+delimiter if parent else '')+encode_folder(name)
+                if any(f['id'].casefold()==raw.casefold() for f in folders):raise Conflict('Такая папка уже есть')
+                status,_=client.create(quoted_folder(raw))
+                if status!='OK':raise MailError('Почтовый сервер не создал папку')
+                try:client.subscribe(quoted_folder(raw))
+                except imaplib.IMAP4.error:pass
+                status,lines=client.list()
+                if status!='OK':raise MailError('Папка создана; обновите список папок')
+                folders=folders_from_list(lines)
+            with self.db.transaction(owner) as c:
+                c.execute('UPDATE mail_accounts SET folders=%s WHERE id=%s AND employee_id=%s',(Jsonb(folders),ident,owner))
+            self.db.audit(owner,'mail.folder_create',ident,{'name':name});self.db.events.publish(owner,'mail.folders')
+            return {'id':raw,'folders':folders}
+        finally:lock.release()
+
+    def mark_many(self,owner,ident,ids,seen):
+        self.account(owner,ident)
+        lock=self.locks[hash(str(ident))%len(self.locks)]
+        if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
+        try:return self._mark_many(owner,ident,ids,seen)
+        finally:lock.release()
+
+    def _mark_many(self,owner,ident,ids,seen):
+        self.account(owner,ident)
+        with self.db.transaction(owner) as c:rows=c.execute('SELECT * FROM mail_messages WHERE id=ANY(%s) AND account_id=%s AND employee_id=%s',(list(set(ids)),ident,owner)).fetchall()
+        if len(rows)!=len(set(ids)):raise NotFound('Письма недоступны')
+        account=self.account(owner,ident)
+        with self.connection(account) as client:
+            for folder in {r['folder'] for r in rows}:
+                validity=select_folder(client,folder,False);selected=[r for r in rows if r['folder']==folder]
+                if any(r['uidvalidity']!=validity for r in selected):raise Conflict('Синхронизируйте папку заново')
+                status,_=client.uid('store',','.join(str(r['uid']) for r in selected),'+FLAGS.SILENT' if seen else '-FLAGS.SILENT','(\\Seen)')
+                if status!='OK':raise MailError('Не удалось изменить отметки прочтения')
+        with self.db.transaction(owner) as c:
+            c.execute('UPDATE mail_messages SET seen=%s WHERE id=ANY(%s) AND employee_id=%s',(seen,ids,owner))
+            if seen:c.execute("UPDATE notifications SET read_at=COALESCE(read_at,now()) WHERE employee_id=%s AND kind='mail.new' AND entity_id=ANY(%s)",(owner,[str(i) for i in ids]))
+        self.db.events.publish(owner,'mail.flags');return {'updated':len(rows)}
+
+    def move(self,owner,ident,folder):
+        row=self.message(owner,ident)
+        lock=self.locks[hash(str(row['account_id']))%len(self.locks)]
+        if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
+        try:return self._move(owner,ident,folder)
+        finally:lock.release()
+
+    def _move(self,owner,ident,folder):
+        row=self.message(owner,ident);account=self.account(owner,row['account_id'])
+        if folder not in [f['id'] for f in account['folders']]:raise MailError('Папка недоступна')
+        if folder==row['folder']:return {'moved':False}
+        with self.connection(account) as client:
+            if b'MOVE' not in client.capabilities:raise MailError('Этот сервер не поддерживает безопасное перемещение писем')
+            if select_folder(client,row['folder'],False)!=row['uidvalidity']:raise Conflict('Синхронизируйте папку заново')
+            status,_=client.uid('MOVE',str(row['uid']),quoted_folder(folder))
+            if status!='OK':raise MailError('Не удалось переместить письмо')
+        with self.db.transaction(owner) as c:
+            c.execute('DELETE FROM mail_messages WHERE id=%s AND employee_id=%s',(ident,owner))
+            c.execute("UPDATE notifications SET read_at=COALESCE(read_at,now()) WHERE employee_id=%s AND entity_id=%s AND kind='mail.new'",(owner,str(ident)))
+        self.db.events.publish(owner,'mail.move');return {'moved':True}
 
     def send(self,owner,body):
         account=self.account(owner,body.account_id)
@@ -317,14 +451,31 @@ class Mailbox:
         self.thread=threading.Thread(target=self.run,name='personal-mail-sync',daemon=True);self.thread.start()
 
     def run(self):
-        while not self.stopping.wait(60):
-            with self.db.transaction(admin=True) as c:
-                accounts=c.execute('SELECT a.id,a.employee_id FROM mail_accounts a JOIN employees e ON e.id=a.employee_id WHERE a.enabled AND e.active AND e.approved').fetchall()
-            def sync_account(account):
-                if self.stopping.is_set():return
-                try:self.sync(account['employee_id'],account['id'])
-                except Exception:pass  # Public failure state is recorded by sync, never credentials.
-            with ThreadPoolExecutor(max_workers=3,thread_name_prefix='imap') as pool:list(pool.map(sync_account,accounts))
+        self.pool=ThreadPoolExecutor(max_workers=3,thread_name_prefix='imap')
+        try:
+            while not self.stopping.is_set():
+                try:self.tick()
+                except Exception:pass  # A transient DB error must not kill auto-sync.
+                self.stopping.wait(1)
+        finally:self.pool.shutdown(wait=False,cancel_futures=True)
+
+    def tick(self,now=None):
+        now=time.monotonic() if now is None else now
+        self.inflight={key:f for key,f in self.inflight.items() if not f.done()}
+        with self.db.transaction(admin=True) as c:
+            accounts=c.execute('SELECT a.id,a.employee_id,a.settings FROM mail_accounts a JOIN employees e ON e.id=a.employee_id WHERE a.enabled AND e.active AND e.approved').fetchall()
+        active={str(a['id']) for a in accounts};self.next_due={key:due for key,due in self.next_due.items() if key in active}
+        for account in sorted(accounts,key=lambda a:self.next_due.get(str(a['id']),0)):
+            key=str(account['id'])
+            if len(self.inflight)>=3:break
+            if key in self.inflight or self.next_due.get(key,0)>now:continue
+            self.next_due[key]=now+60;self.inflight[key]=self.pool.submit(self.sync_account,account)
+
+    def sync_account(self,account):
+        for folder in (account.get('settings') or {}).get('sync_folders',['INBOX']):
+            if self.stopping.is_set():return
+            try:self.sync(account['employee_id'],account['id'],folder)
+            except Exception:pass
 
     def close(self):
         self.stopping.set()

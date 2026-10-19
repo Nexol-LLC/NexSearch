@@ -1,6 +1,7 @@
 'use strict';
 const {app,BrowserWindow,WebContentsView,ipcMain,shell,session,dialog,clipboard}=require('electron');
 const path=require('path');
+const {documentBytes,documentName}=require('./documents.cjs');
 app.setName('NexSearch');
 if(process.platform==='win32')app.setAppUserModelId('ru.nexsearch.v13');
 const argument=key=>process.argv.find(a=>a.startsWith(key+'='))?.slice(key.length+1);
@@ -32,7 +33,7 @@ async function quit(){if(exiting)return;exiting=true;hide();
 app.whenReady().then(()=>{
  if(process.platform==='darwin')app.dock?.setIcon(path.join(__dirname,'logo.png'));
  for(const s of [session.defaultSession,session.fromPartition('persist:nexsearch-services')]){s.setPermissionRequestHandler((_wc,_permission,cb)=>cb(false));s.setPermissionCheckHandler(()=>false);}
- win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.6.0',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
+ win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.6.1',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
  guard(win.webContents,true);win.on('close',event=>{if(!exiting){event.preventDefault();quit();}});
  for(const [name,fn] of Object.entries({'service:show':show,'service:hide':hide,'service:bounds':v=>active?.setBounds(bounds(v)),'service:back':()=>{if(active?.webContents.navigationHistory.canGoBack())active.webContents.navigationHistory.goBack();},'service:reload':()=>active?.webContents.reload(),'update:prepare':async()=>{
   if(process.platform!=='win32'||!program||!home)throw Error('Используйте комплект и инструкцию обновления для этой платформы');
@@ -47,9 +48,11 @@ app.whenReady().then(()=>{
   const fs=require('fs');const runner=path.join(home,'updates','runner-'+Date.now()+'.exe');fs.copyFileSync(path.join(program,'NexSearch Maintenance.exe'),runner);
   const child=require('child_process').spawn(runner,['apply','--state',state],{windowsHide:true,detached:true,stdio:'ignore'});child.unref();await quit();return true;
  },'clipboard:write':text=>{if(typeof text!=='string'||text.length>10000)throw Error('Invalid clipboard text');clipboard.writeText(text);return true;},'application:quit':quit,'document:xlsx':async(bytes,name)=>{
-  if(!(bytes instanceof Uint8Array)||bytes.byteLength>32*1024*1024||bytes[0]!==80||bytes[1]!==75||typeof name!=='string'||name.length>200)throw Error('Invalid Excel document');
-  const choice=await dialog.showSaveDialog(win,{title:'Сохранить Excel',defaultPath:name.replace(/[\\/:*?"<>|]/g,'-'),filters:[{name:'Excel',extensions:['xlsx']}]});if(choice.canceled)return false;
-  await require('fs').promises.writeFile(choice.filePath,bytes);return true;
+  const data=documentBytes(bytes,true);const choice=await dialog.showSaveDialog(win,{title:'Сохранить Excel',defaultPath:documentName(name),filters:[{name:'Excel',extensions:['xlsx']}]});if(choice.canceled)return false;
+  await require('fs').promises.writeFile(choice.filePath,data);return true;
+ },'document:file':async(bytes,name)=>{
+  const data=documentBytes(bytes);const choice=await dialog.showSaveDialog(win,{title:'Сохранить вложение',defaultPath:documentName(name)});if(choice.canceled)return false;
+  await require('fs').promises.writeFile(choice.filePath,data);return true;
  },'document:pdf':async(html,name)=>{
   if(typeof html!=='string'||html.length>8*1024*1024||typeof name!=='string'||name.length>200)throw Error('Invalid print document');
   const choice=await dialog.showSaveDialog(win,{title:'Сохранить схему погрузки',defaultPath:name.replace(/[\\/:*?"<>|]/g,'-')+'.pdf',filters:[{name:'PDF',extensions:['pdf']}]});if(choice.canceled)return false;

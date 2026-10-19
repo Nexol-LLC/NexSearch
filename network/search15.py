@@ -1,5 +1,6 @@
 """Four employee searches share paced sources, verification cache and unique leads."""
 import threading,time,logging
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from urllib.parse import urlsplit
 import psycopg
@@ -30,15 +31,29 @@ class SearchWorker(BaseWorker):
    for event in self.cancel_events.values():event.set()
   super().stop()
  def loop(self):
+  while not self.closed.is_set():
+   try:self._serve_once()
+   except Exception:LOG.exception('Search coordinator interrupted; reconnecting without discarding queued jobs')
+   with self.cancel_lock:self.cancel_events.clear()
+   self.closed.wait(2)
+ @contextmanager
+ def executor(self):
+  with ThreadPoolExecutor(max_workers=4,thread_name_prefix='employee-search') as pool:
+   try:yield pool
+   finally:
+    with self.cancel_lock:
+     for event in self.cancel_events.values():event.set()
+ def _serve_once(self):
   with psycopg.connect(self.db.pool.conninfo,autocommit=True) as lease:
    if not lease.execute('SELECT pg_try_advisory_lock(73142003)').fetchone()[0]:return
    with self.db.transaction(admin=True) as conn:
     conn.execute("UPDATE scraper_candidates SET state='pending',last_attempt=NULL WHERE state='processing'")
     conn.execute("UPDATE jobs SET status='queued' WHERE status='running' AND NOT stop_requested")
     conn.execute("UPDATE jobs SET status='stopped',finished_at=now() WHERE stop_requested AND status IN ('queued','running')")
-   with ThreadPoolExecutor(max_workers=4,thread_name_prefix='employee-search') as pool:
-    pending={}
+   with self.executor() as pool:
+    pending={};heartbeat=0.
     while not self.closed.is_set():
+     if time.monotonic()-heartbeat>=5:lease.execute('SELECT 1');heartbeat=time.monotonic()
      enqueue_due(self.db)
      for future in list(pending):
       if future.done():

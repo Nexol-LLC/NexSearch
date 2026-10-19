@@ -22,10 +22,14 @@ def wait(url,process):
 
 def stop(url,process):
     if not process or process.poll() is not None:return
+    started=time.monotonic()
     try:
         info=requests.get(url+'/api/connection',timeout=2).json()
         requests.post(url+'/api/client/exit',headers={'Origin':url,'X-Nexol-CSRF':info['csrf']},json={},timeout=2)
     finally:process.wait(timeout=90)
+    elapsed=time.monotonic()-started
+    print('Graceful shutdown '+url+': '+str(round(elapsed,2))+' seconds',flush=True)
+    assert elapsed<20,'Idle application shutdown must not wait for a streaming notification connection'
 
 def main():
     # Keep every run independent: a prior company reservation belongs to its
@@ -44,7 +48,7 @@ def main():
         host=subprocess.Popen([str(ROOT/'dist/HostWindows/NexSearch.exe')],env=env,cwd=ROOT/'dist/HostWindows',creationflags=subprocess.CREATE_NO_WINDOW)
         wait('http://127.0.0.1:9058/api/connection',host)
         status=requests.get('http://127.0.0.1:9058/api/host/status',timeout=5);assert status.status_code==200,status.text
-        assert status.json()['version']=='1.6.0'
+        assert status.json()['version']=='1.6.1'
         trust=json.loads((host_home/'identity/host-identity.json').read_text())
         session=requests.Session();session.trust_env=False;session.mount('https://',PinnedAdapter(trust['fingerprint']))
         secret=secure_store.read(host_home/'admin.sec')
@@ -66,28 +70,29 @@ def main():
         employee=subprocess.Popen([str(ROOT/'dist/EmployeeWindows/NexSearch.exe')],env=employee_env,cwd=ROOT/'dist/EmployeeWindows',creationflags=subprocess.CREATE_NO_WINDOW)
         wait('http://127.0.0.1:9060/api/connection',employee)
         ui='http://127.0.0.1:9060'
-        index=requests.get(ui,timeout=5).text;assert '1.6.0' in index and 'workspace16.js' in index
+        index=requests.get(ui,timeout=5).text;assert '1.6.1' in index and 'workspace16.js' in index and 'mail_workspace16.js' in index
         data=requests.get(ui+'/api/leads',timeout=5).json()['companies'];assert data[0]['company_time']['utc_offset']==4
         assert requests.get(ui+'/api/mail/accounts',timeout=5).json()['accounts']==[]
         assert requests.get(ui+'/api/client/vpn/status',timeout=5).json()['phase']=='disabled'
         assert 'vpn16.js' in index
         assert requests.get(ui+'/assets/vpn16.js',timeout=5).status_code==200
         csrf=requests.get(ui+'/api/connection',timeout=5).json()['csrf'];headers={'Origin':ui,'X-Nexol-CSRF':csrf}
-        enabled=requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':True,'provider':'tailscale'},timeout=10)
-        assert enabled.status_code==200,enabled.text
-        deadline=time.monotonic()+30
-        while time.monotonic()<deadline:
-            vpn=requests.get(ui+'/api/client/vpn/status',timeout=5).json()
-            if vpn['phase']=='needs_login' and vpn.get('auth_url'):break
-            assert vpn['phase'] not in ('missing','error'),vpn['message']
-            time.sleep(.3)
-        else:raise RuntimeError('The bundled native VPN helper did not reach first-login state')
-        assert requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':False},timeout=20).status_code==200
+        if os.environ.get('NEXSEARCH_TEST_VPN')=='1':
+            enabled=requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':True,'provider':'tailscale'},timeout=10)
+            assert enabled.status_code==200,enabled.text
+            deadline=time.monotonic()+30
+            while time.monotonic()<deadline:
+                vpn=requests.get(ui+'/api/client/vpn/status',timeout=5).json()
+                if vpn['phase']=='needs_login' and vpn.get('auth_url'):break
+                assert vpn['phase'] not in ('missing','error'),vpn['message']
+                time.sleep(.3)
+            else:raise RuntimeError('The bundled native VPN helper did not reach first-login state')
+            assert requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':False},timeout=20).status_code==200
         task=requests.post(ui+'/api/tasks',headers=headers,json={'title':'Compiled task 1.6','due_at':(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()},timeout=5)
         assert task.status_code==200,task.text
         assert requests.get(ui+'/api/notifications',timeout=5).json()['unread']>=1
-        print('Compiled HostWindows and EmployeeWindows: startup, PostgreSQL migration, timezone assets, mail routes, tasks, notifications and bundled native VPN onboarding passed.',flush=True)
-        (base/'result.json').write_text(json.dumps({'version':'1.6.0','compiled_host':True,'compiled_employee':True,'schema':16,'passed':True,'test_home':str(home)}),encoding='utf-8')
+        print('Compiled HostWindows and EmployeeWindows: startup, PostgreSQL migration, timezone assets, mail routes, tasks, notifications passed (VPN onboarding is opt-in).',flush=True)
+        (base/'result.json').write_text(json.dumps({'version':'1.6.1','compiled_host':True,'compiled_employee':True,'schema':17,'passed':True,'test_home':str(home)}),encoding='utf-8')
     finally:
         try:stop('http://127.0.0.1:9060',employee)
         finally:

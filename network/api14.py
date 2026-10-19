@@ -323,7 +323,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
   async def stream():
    nonlocal position,user
    count=0
-   while not await request.is_disconnected():
+   while not db.events.closed.is_set() and not await request.is_disconnected():
     if count%10==0:
      try:user=await asyncio.to_thread(auth.authenticate,token,request.client.host)
      except PermissionError:

@@ -2,7 +2,7 @@
 from pathlib import Path
 from datetime import datetime,timezone
 from uuid import uuid4
-import os,threading,time,hashlib,subprocess,json,shutil
+import os,threading,time,hashlib,subprocess,json,shutil,logging
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
@@ -22,10 +22,10 @@ class Backups:
   if self.thread:self.thread.join(timeout=60)
  def loop(self):
   while not self.closed.wait(60):
-   with self.db.transaction(admin=True) as c:recent=c.execute("SELECT 1 FROM backup_records WHERE status='verified' AND created_at>now()-interval '24 hours'").fetchone()
-   if not recent:
-    try:self.create()
-    except Exception:pass
+   try:
+    with self.db.transaction(admin=True) as c:recent=c.execute("SELECT 1 FROM backup_records WHERE status='verified' AND created_at>now()-interval '24 hours'").fetchone()
+    if not recent:self.create()
+   except Exception:logging.getLogger('nexsearch.backups').exception('Backup check failed; retrying on the next cycle')
  def create(self,employee=None):
   if not self.available():raise ValueError('На Ubuntu резервные копии выполняются службой PostgreSQL; используйте комплектный backup.sh')
   if not self.gate.acquire(blocking=False):raise ValueError('Резервное копирование уже выполняется')

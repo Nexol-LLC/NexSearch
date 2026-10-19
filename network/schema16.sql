@@ -51,3 +51,10 @@ DO $$ DECLARE tab text; BEGIN
  END LOOP;
 END $$;
 INSERT INTO schema_meta(version) VALUES(16) ON CONFLICT DO NOTHING;
+
+-- 1.6.1 is additive and can be reapplied to an existing 1.6 database.
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS body_html text NOT NULL DEFAULT '';
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS content_version integer NOT NULL DEFAULT 0;
+-- Older privileged updaters execute schema16 from the signed target package.
+INSERT INTO schema_meta(version) VALUES(17) ON CONFLICT DO NOTHING;

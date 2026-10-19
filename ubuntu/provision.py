@@ -32,6 +32,7 @@ with psycopg.connect('dbname=nexsearch') as conn:
  conn.execute((root/'network/schema14.sql').read_text(encoding='utf-8'))
  conn.execute((root/'network/schema15.sql').read_text(encoding='utf-8'))
  conn.execute((root/'network/schema16.sql').read_text(encoding='utf-8'))
+ conn.execute((root/'network/schema17.sql').read_text(encoding='utf-8'))
  conn.execute("INSERT INTO employees(id,login,first_name,last_name,password_hash,is_admin,role,requested_role) VALUES(%s,%s,%s,%s,%s,true,'director','director')",(uuid4(),login,first,last,HASHER.hash(human)))
  conn.execute('GRANT USAGE ON SCHEMA public TO nexsearch_app')
  conn.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO nexsearch_app')

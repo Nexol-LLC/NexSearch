@@ -3,7 +3,8 @@ from collections import deque
 import threading
 
 class EventHub:
- def __init__(self):self.lock=threading.Lock();self.sequence=0;self.events=deque(maxlen=1024)
+ def __init__(self):self.lock=threading.Lock();self.sequence=0;self.events=deque(maxlen=1024);self.closed=threading.Event()
+ def close(self):self.closed.set()
  def publish(self,owner,kind,role='',department='main'):
   with self.lock:
    self.sequence+=1;self.events.append({'version':self.sequence,'owner':str(owner or ''),'kind':kind,'role':role,'department':department});return self.sequence
