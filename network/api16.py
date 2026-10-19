@@ -84,7 +84,7 @@ class MailFolder(Input):
     name:str=Field(min_length=1,max_length=100)
     parent:str=Field(default='',max_length=512)
 class MailMarkMany(Input):
-    ids:list[UUID]=Field(min_length=1,max_length=500)
+    ids:list[UUID]=Field(min_length=1,max_length=1000)
     seen:bool=True
 class MailMove(Input):folder:str=Field(min_length=1,max_length=512)
 class SendMail(Input):
@@ -290,7 +290,18 @@ def create_app(*args,**kwargs):
             if before_uid is not None and account_id and not company_id:where+=' AND uid<%s';params.append(before_uid)
             ordering='uid DESC' if account_id and not company_id else 'COALESCE(sent_at,cached_at) DESC,id'
             items=c.execute('SELECT '+MESSAGE_FIELDS+' FROM mail_messages WHERE '+where+' ORDER BY '+ordering+' LIMIT %s',params+[max(1,min(500,limit))]).fetchall()
-        return {'messages':items}
+            related=[]
+            if account_id and not company_id and items:
+                from email.utils import getaddresses
+                account=c.execute('SELECT email,login,folders FROM mail_accounts WHERE id=%s AND employee_id=%s AND enabled',(account_id,user['id'])).fetchone()
+                if not account:raise NotFound('Почтовый аккаунт недоступен')
+                own=account['email'].casefold()
+                sent=[f['id'] for f in account['folders'] if f.get('sent')]
+                partners=list(dict.fromkeys(address.casefold() for item in items for _,address in getaddresses(item['recipients'] if item['folder'] in sent else [item['sender']]) if address and address.casefold() not in (own,account['login'].casefold())))[:200]
+                other_folders=['INBOX'] if folder in sent else sent
+                if partners and other_folders:
+                    related=c.execute('SELECT '+MESSAGE_FIELDS+' FROM mail_messages WHERE employee_id=%s AND account_id=%s AND folder=ANY(%s) AND addresses && %s::text[] ORDER BY COALESCE(sent_at,cached_at) DESC,id LIMIT 500',(user['id'],account_id,other_folders,partners)).fetchall()
+        return {'messages':items,'related':related}
     @app.get('/api/mail/messages/{ident}')
     def read_message(ident:UUID,user=Depends(employee)):return mail.read(user['id'],ident)
     @app.patch('/api/mail/messages/{ident}')
@@ -299,6 +310,10 @@ def create_app(*args,**kwargs):
     def attachment(ident:UUID,index:int,user=Depends(employee)):
         name,data=mail.attachment(user['id'],ident,index)
         return Response(data,media_type='application/octet-stream',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe=''),'Content-Security-Policy':"sandbox; default-src 'none'"})
+    @app.get('/api/mail/messages/{ident}/images/{index}')
+    def mail_image(ident:UUID,index:int,user=Depends(employee)):
+        data,kind=mail.image(user['id'],ident,index)
+        return Response(data,media_type=kind,headers={'Cache-Control':'private, max-age=600','X-Content-Type-Options':'nosniff','Content-Security-Policy':"sandbox; default-src 'none'"})
     @app.post('/api/mail/send')
     def send_message(body:SendMail,user=Depends(employee)):return mail.send(user['id'],body)
     @app.get('/api/remote/status')

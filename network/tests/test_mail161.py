@@ -36,15 +36,16 @@ def test_create_nested_unicode_folder_is_remote_and_owner_only(db,fake_mail):
     assert api.post(url,headers=header(a),json={'name':'bad\r\nCREATE stolen'}).status_code==400
     assert api.post(url,headers=header(a),json={'name':'Клиенты & рейсы'}).status_code==409
 
-def test_rich_html_retains_tables_and_cid_but_no_active_or_remote_content():
+def test_rich_html_retains_tables_and_cid_but_no_active_or_direct_remote_content():
     message=EmailMessage();message.set_content('Текстовая версия')
     message.add_alternative('''<html><body><h1>Ставка</h1><table><tr><td style="color:#6633aa;padding:12px;background-image:url(https://tracker/a)">150 000 ₽</td></tr></table><img src="https://tracker/a" alt="Удалённое изображение"><img src="cid:logo"><a href="javascript:steal()" onclick="steal()">Ссылка</a><script>steal()</script><iframe src="https://evil/"></iframe><svg onload="steal()"></svg><form action="https://evil/"><input name="secret"></form></body></html>''',subtype='html')
     html_part=message.get_payload()[-1];html_part.add_related(b'\x89PNG\r\n\x1a\n\x00',maintype='image',subtype='png',cid='<logo>')
     text,html,attachments=rich_content(message)
     assert 'Текстовая версия' in text and '<table>' in html and 'color:#6633aa' in html and 'data:image/png;base64,' in html
-    for forbidden in ('script','iframe','onload','onclick','javascript','https://tracker','https://evil','background-image'):
+    for forbidden in ('script','iframe','onload','onclick','javascript','src="https://tracker','https://evil','background-image'):
         assert forbidden not in html
     assert 'Удалённое изображение' in html
+    assert 'data-mail-image="0"' in html and 'data-mail-remote="https://tracker/a"' in html
     assert 'url' not in sanitize_html('<p style="color:expression(url(test));width:999999px">x</p>')
 
 def test_read_modes_rich_cache_unread_filter_and_bulk_flags(db,fake_mail):
@@ -110,7 +111,7 @@ def test_schema16_upgrade_preserves_accounts_messages_and_employees(db,fake_mail
     with db.transaction(admin=True) as c:
         c.execute('ALTER TABLE mail_accounts DROP COLUMN settings')
         c.execute('ALTER TABLE mail_messages DROP COLUMN body_html,DROP COLUMN content_version')
-        c.execute('DELETE FROM schema_meta WHERE version=17')
+        c.execute('DELETE FROM schema_meta WHERE version>=17')
     db.initialize();db.initialize()  # Both the real upgrade and a repeated startup.
     accounts=api.get('/api/mail/accounts',headers=header(a)).json()['accounts']
     assert accounts[0]['id']==ident and accounts[0]['settings']=={}
@@ -135,7 +136,7 @@ def test_151_privileged_updater_finishes_migration_before_readonly_runtime(db):
     with db.transaction(admin=True) as c:
         c.execute('ALTER TABLE mail_accounts DROP COLUMN settings')
         c.execute('ALTER TABLE mail_messages DROP COLUMN body_html,DROP COLUMN content_version')
-        c.execute('DELETE FROM schema_meta WHERE version=17')
+        c.execute('DELETE FROM schema_meta WHERE version>=17')
         # This is the exact migration list in the deployed 1.5.1 updater.
         for name in ('schema14.sql','schema15.sql'):c.execute((root/'network'/name).read_text(encoding='utf-8'))
     with psycopg.connect(admin_dsn,autocommit=True) as admin:

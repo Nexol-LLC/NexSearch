@@ -1,6 +1,6 @@
 {
-  "version": "1.6.2",
-  "schema": 17,
+  "version": "1.6.3",
+  "schema": 18,
   "host_branch": "host",
   "employee_branch": "employe",
   "check_time": "10:00 Europe/Moscow"

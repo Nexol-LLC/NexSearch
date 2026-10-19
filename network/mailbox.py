@@ -1,4 +1,4 @@
-"""Personal IMAP/SMTP mail. Passwords are sealed; HTML and remote images never run."""
+"""Personal IMAP/SMTP mail; sealed passwords, reconnectable reads, sandboxed HTML."""
 import base64
 import hashlib
 import imaplib
@@ -31,9 +31,13 @@ from .mail_html import sanitize_html,raster_uri
 
 MAX_MESSAGE=15*1024*1024
 ACCOUNT_FIELDS='id,email,login,label,imap_host,imap_port,smtp_host,smtp_port,enabled,folders,settings,last_sync_at,last_error'
-MESSAGE_FIELDS='id,account_id,folder,uid,subject,sender,recipients,addresses,sent_at,seen,size_bytes,message_id'
+MESSAGE_FIELDS='id,account_id,folder,uid,subject,sender,recipients,addresses,sent_at,seen,size_bytes,message_id,in_reply_to,reference_ids'
 
 class MailError(ValueError):pass
+class MailConnectionError(MailError):pass
+class MailAuthenticationError(MailError):pass
+
+def message_ids(value):return list(dict.fromkeys(re.findall(r'<[^<>\s]{1,998}>',str(value or ''))))[-50:]
 
 def _key():
     try:raw=key_path().read_bytes()
@@ -54,10 +58,12 @@ def public_socket(host,port,timeout=12):
     except OSError:raise MailError('Почтовый сервер не найден') from None
     if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
         raise MailError('Укажите публичный почтовый сервер с TLS')
-    last=None
-    for family,kind,proto,_,address in addresses:
-        sock=socket.socket(family,kind,proto);sock.settimeout(timeout)
-        try:sock.connect(address);return sock
+    last=None;deadline=time.monotonic()+timeout
+    for family,kind,proto,_,address in sorted(addresses,key=lambda a:a[0]!=socket.AF_INET):
+        remaining=deadline-time.monotonic()
+        if remaining<=0:break
+        sock=socket.socket(family,kind,proto);sock.settimeout(min(4,remaining))
+        try:sock.connect(address);sock.settimeout(timeout);return sock
         except OSError as error:last=error;sock.close()
     raise MailError('Почтовый сервер не отвечает') from last
 
@@ -92,16 +98,15 @@ def folders_from_list(lines):
         match=re.match(rb'\(([^)]*)\)\s+("(?:[^"\\]|\\.)*"|NIL)\s+(.+)$',line)
         if not match:continue
         flags=match[1].decode('ascii','ignore').lower()
-        if '\\noselect' in flags:continue
         delimiter=match[2].decode('ascii').strip('"') if match[2]!=b'NIL' else None
         raw=match[3].decode('ascii','replace')
         if raw.startswith('"') and raw.endswith('"'):raw=re.sub(r'\\(.)',r'\1',raw[1:-1])
         if len(raw)>512 or any(ord(c)<32 for c in raw):continue
         display=folder_name(raw)
         sent='\\sent' in flags or display.casefold() in ('sent','sent items','sent messages','отправленные')
-        result.append({'id':raw,'name':display,'sent':sent,'delimiter':delimiter,'quiet':sent or any(flag in flags for flag in ('\\drafts','\\trash','\\junk'))})
+        result.append({'id':raw,'name':display,'sent':sent,'delimiter':delimiter,'selectable':'\\noselect' not in flags,'quiet':sent or any(flag in flags for flag in ('\\drafts','\\trash','\\junk'))})
     if not any(f['id'].upper()=='INBOX' for f in result):result.insert(0,{'id':'INBOX','name':'Входящие','sent':False})
-    return result[:100]
+    return sorted(result,key=lambda f:(f['id'].upper()!='INBOX',f['name'].casefold()))[:100]
 
 def select_folder(client,folder,readonly=True):
     if len(folder)>512 or any(ord(c)<32 for c in folder):raise MailError('Недопустимая папка')
@@ -147,6 +152,9 @@ def rich_content(message):
         if cid and part.get_content_type().startswith('image/'):
             image=raster_uri(part.get_payload(decode=True) or b'',part.get_content_type())
             if image:inline[cid]=image
+        if part.get('Content-Location') and part.get_content_type().startswith('image/'):
+            image=raster_uri(part.get_payload(decode=True) or b'',part.get_content_type())
+            if image:inline[str(part['Content-Location'])]=image
         if part.get_content_type()=='text/html' and part.get_content_disposition()!='attachment' and not part.get_filename():
             try:html.append(str(part.get_content()))
             except (LookupError,UnicodeError):html.append((part.get_payload(decode=True) or b'').decode('utf-8','replace'))
@@ -172,7 +180,8 @@ def headers(raw,metadata):
     try:date=parsedate_to_datetime(str(message.get('date','')));date=date if date.tzinfo else date.replace(tzinfo=timezone.utc)
     except (TypeError,ValueError,OverflowError):date=None
     return {'subject':str(message.get('subject','Без темы'))[:1000],'sender':str(message.get('from',''))[:1000],
-      'recipients':[a for _,a in recipients],'addresses':addresses,'sent_at':date,'message_id':str(message.get('message-id',''))[:1000],
+      'recipients':[a for _,a in recipients],'addresses':addresses,'sent_at':date,'message_id':next(iter(message_ids(message.get('message-id',''))),'') ,
+      'in_reply_to':next(iter(message_ids(message.get('in-reply-to',''))),'') , 'reference_ids':message_ids(message.get('references','')),
       'seen':b'\\Seen' in metadata,'size_bytes':int((re.search(rb'RFC822.SIZE (\d+)',metadata) or [b'',b'0'])[1])}
 
 class Mailbox:
@@ -180,21 +189,51 @@ class Mailbox:
         self.db=db;self.stopping=threading.Event();self.thread=None
         self.locks=[threading.Lock() for _ in range(64)];self.slots=threading.BoundedSemaphore(3)
         self.pool=None;self.inflight={};self.next_due={}
+        self.connection_locks=[threading.RLock() for _ in range(64)]
+        from .mail_images import ImageCache
+        self.images=ImageCache()
 
     @contextmanager
     def connection(self,account):
-        client=None
+        client=None;phase='connect';lock=self.connection_locks[hash(str(account['id']))%len(self.connection_locks)]
+        if not lock.acquire(timeout=4):raise Conflict('Почта обновляется. Повторите действие через несколько секунд.')
+        acquired=False
         try:
+            acquired=self.slots.acquire(timeout=4)
+            if not acquired:raise Conflict('Почтовые подключения заняты. Повторите через несколько секунд.')
             client=SecureIMAP(account['imap_host'],account['imap_port'],ssl_context=ssl.create_default_context(),timeout=12)
+            phase='login'
             client.login(account['login'],unseal(account['secret'],account['employee_id'],account['id']))
+            phase='operation'
             yield client
-        except imaplib.IMAP4.error:raise MailError('Не удалось войти в почту. Проверьте пароль приложения и доступ по IMAP.') from None
-        except (OSError,ssl.SSLError,UnicodeError):raise MailError('Не удалось установить защищённое соединение с почтой') from None
+            phase='done'
+        except imaplib.IMAP4.abort:raise MailConnectionError('Соединение с почтовым сервером прервано. Переподключаемся автоматически; ящик отключать не нужно.') from None
+        except imaplib.IMAP4.error as error:
+            if phase=='login':
+                if re.search(r'unavailable|too many|rate.?limit|temporar|try again|\[limit\]',str(error),re.I):raise MailConnectionError('Почтовый сервер временно ограничил подключения. Повторим вход автоматически.') from None
+                raise MailAuthenticationError('Сервер отклонил вход. Проверьте пароль приложения в настройках ящика.') from None
+            raise MailError('Почтовый сервер не выполнил операцию. Повторите позже.') from None
+        except (OSError,ssl.SSLError,EOFError):raise MailConnectionError('Почтовый сервер временно недоступен. Переподключимся автоматически.') from None
+        except UnicodeError:raise MailError('Почтовый сервер прислал данные в неподдерживаемой кодировке') from None
         except InvalidTag:raise MailError('Защищённый пароль недоступен. Подключите почтовый ящик заново.') from None
         finally:
             if client:
-                try:client.logout()
+                try:
+                    if phase=='done':
+                        if getattr(client,'sock',None):client.sock.settimeout(2)
+                        client.logout()
                 except Exception:pass
+                try:client.shutdown()
+                except Exception:pass
+            if acquired:self.slots.release()
+            lock.release()
+
+    def reconnect_read(self,operation):
+        for attempt in range(2):
+            try:return operation()
+            except MailConnectionError:
+                if attempt:raise
+                if self.stopping.wait(.25):raise
 
     def account(self,owner,ident):
         with self.db.transaction(owner) as c:
@@ -222,9 +261,7 @@ class Mailbox:
         lock=self.locks[hash(str(ident))%len(self.locks)]
         if not lock.acquire(blocking=False):raise Conflict('Почта уже синхронизируется')
         try:
-            if not self.slots.acquire(blocking=False):raise Conflict('Почтовые подключения заняты. Повторите через несколько секунд.')
-            try:return self._sync(owner,ident,folder,before_uid)
-            finally:self.slots.release()
+            return self.reconnect_read(lambda:self._sync(owner,ident,folder,before_uid))
         except MailError as error:
             with self.db.transaction(owner) as c:c.execute('UPDATE mail_accounts SET last_error=%s WHERE id=%s AND employee_id=%s',(str(error),ident,owner))
             raise
@@ -241,7 +278,7 @@ class Mailbox:
             uids=[int(u) for u in (values[0] or b'').split() if u.isdigit()]
             batch=[uid for uid in uids if before_uid is None or uid<before_uid][-100:];fetched=[]
             if batch:
-                status,data=client.uid('fetch',','.join(map(str,batch)),'(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO CC DATE MESSAGE-ID)])')
+                status,data=client.uid('fetch',','.join(map(str,batch)),'(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO CC DATE MESSAGE-ID IN-REPLY-TO REFERENCES)])')
                 if status!='OK':raise MailError('Не удалось загрузить заголовки писем')
                 for value in data:
                     if not isinstance(value,tuple):continue
@@ -257,10 +294,10 @@ class Mailbox:
             for old in cached:
                 if old['uid'] not in active:c.execute('DELETE FROM mail_messages WHERE id=%s',(old['id'],))
             for uid,item in fetched:
-                row=c.execute('''INSERT INTO mail_messages(id,employee_id,account_id,folder,uidvalidity,uid,subject,sender,recipients,addresses,sent_at,seen,size_bytes,message_id)
-                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                  ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET seen=excluded.seen
-                  RETURNING id''',(uuid4(),owner,ident,folder,validity,uid,item['subject'],item['sender'],Jsonb(item['recipients']),item['addresses'],item['sent_at'],item['seen'],item['size_bytes'],item['message_id'])).fetchone()
+                row=c.execute('''INSERT INTO mail_messages(id,employee_id,account_id,folder,uidvalidity,uid,subject,sender,recipients,addresses,sent_at,seen,size_bytes,message_id,in_reply_to,reference_ids)
+                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET seen=excluded.seen,in_reply_to=excluded.in_reply_to,reference_ids=excluded.reference_ids
+                  RETURNING id''',(uuid4(),owner,ident,folder,validity,uid,item['subject'],item['sender'],Jsonb(item['recipients']),item['addresses'],item['sent_at'],item['seen'],item['size_bytes'],item['message_id'],item['in_reply_to'],item['reference_ids'])).fetchone()
                 folder_info=next((f for f in folders if f['id']==folder),{})
                 if not initial and not folder_info.get('quiet',folder_info.get('sent',False)) and (account.get('settings') or {}).get('notifications',True) and uid>highest and not item['seen']:
                     notify(c,owner,'mail.new',item['subject'],item['sender'],row['id'],f'mail:{ident}:{folder}:{validity}:{uid}')
@@ -276,6 +313,9 @@ class Mailbox:
         return row
 
     def raw_message(self,owner,row):
+        return self.reconnect_read(lambda:self._raw_message(owner,row))
+
+    def _raw_message(self,owner,row):
         if row['size_bytes']>MAX_MESSAGE:raise MailError('Письмо больше 15 МБ. Откройте его в почте провайдера.')
         account=self.account(owner,row['account_id'])
         with self.connection(account) as client:
@@ -290,19 +330,28 @@ class Mailbox:
     def read(self,owner,ident):
         row=self.message(owner,ident)
         warning=''
-        if row['body_text'] is None or row['content_version']<1:
+        if row['body_text'] is None or row['content_version']<2:
             try:
-                body,html,attachments=rich_content(self.raw_message(owner,row))
-                with self.db.transaction(owner) as c:c.execute('UPDATE mail_messages SET body_text=%s,body_html=%s,content_version=1,attachments=%s WHERE id=%s AND employee_id=%s',(body,html,Jsonb(attachments),ident,owner))
-                row.update(body_text=body,body_html=html,attachments=attachments,content_version=1)
-            except MailError:
+                raw=self.raw_message(owner,row);body,html,attachments=rich_content(raw)
+                parent=next(iter(message_ids(raw.get('in-reply-to',''))),'');refs=message_ids(raw.get('references',''));message_id=next(iter(message_ids(raw.get('message-id',''))),row['message_id'])
+                with self.db.transaction(owner) as c:c.execute('UPDATE mail_messages SET body_text=%s,body_html=%s,content_version=2,attachments=%s,in_reply_to=%s,reference_ids=%s,message_id=%s WHERE id=%s AND employee_id=%s',(body,html,Jsonb(attachments),parent,refs,message_id,ident,owner))
+                row.update(body_text=body,body_html=html,attachments=attachments,content_version=2,in_reply_to=parent,reference_ids=refs,message_id=message_id)
+            except (MailError,Conflict):
                 if row['body_text'] is None:raise
-                warning='Почтовый сервер недоступен. Показана сохранённая текстовая версия.'
+                warning='Почтовый сервер недоступен. Показана сохранённая копия письма.'
         if not row['seen']:
             try:self.mark(owner,ident,True);row['seen']=True
             except (MailError,Conflict):warning=warning or 'Письмо открыто, но отметку прочтения не удалось синхронизировать. Повторите позже.'
         account=self.account(owner,row['account_id'])
-        return {**{k:v for k,v in row.items() if k not in ('employee_id','uid','uidvalidity')},'warning':warning,'read_mode':(account.get('settings') or {}).get('read_mode','auto')}
+        from .mail_images import image_urls
+        return {**{k:v for k,v in row.items() if k not in ('employee_id','uid','uidvalidity')},'remote_image_count':len(image_urls(row.get('body_html') or '')),'warning':warning,'read_mode':(account.get('settings') or {}).get('read_mode','auto')}
+
+    def image(self,owner,ident,index):
+        from .mail_images import image_urls,ImageUnavailable
+        row=self.message(owner,ident);urls=image_urls(row.get('body_html') or '')
+        if index<0 or index>=len(urls):raise NotFound('Изображение не найдено')
+        try:return self.images.get(owner,urls[index],public_socket)
+        except ImageUnavailable as exc:raise MailError(str(exc)) from None
 
     def mark(self,owner,ident,seen):
         row=self.message(owner,ident)
@@ -332,7 +381,7 @@ class Mailbox:
                 status,lines=client.list()
                 if status!='OK':raise MailError('Не удалось проверить папки почты')
                 folders=folders_from_list(lines)
-        if not set(body.sync_folders)<={f['id'] for f in folders}:raise MailError('Обновите список папок и выберите доступные папки')
+        if not set(body.sync_folders)<={f['id'] for f in folders if f.get('selectable',True)}:raise MailError('Обновите список папок и выберите доступные папки')
         settings={'read_mode':body.read_mode,'signature':body.signature,'notifications':body.notifications,'sync_folders':list(dict.fromkeys(body.sync_folders))}
         with self.db.transaction(owner) as c:
             c.execute('''UPDATE mail_accounts SET label=%s,login=%s,imap_host=%s,smtp_host=%s,secret=%s,settings=%s,folders=%s,last_error=''
@@ -425,7 +474,9 @@ class Mailbox:
         message['Subject']=body.subject;message['Date']=formatdate(localtime=False);message['Message-ID']=make_msgid()
         if body.reply_to:
             previous=self.message(owner,body.reply_to)
-            if previous['message_id']:message['In-Reply-To']=previous['message_id'];message['References']=previous['message_id']
+            if previous['account_id']!=account['id']:raise MailError('Ответ нужно отправлять из ящика, в котором получено письмо')
+            if previous['message_id']:
+                message['In-Reply-To']=previous['message_id'];message['References']=' '.join(list(dict.fromkeys([*previous.get('reference_ids',[]),previous['message_id']]))[-50:])
         message.set_content(body.text)
         warning=''
         try:
@@ -444,6 +495,7 @@ class Mailbox:
                     if status!='OK':warning+=' Письмо отправлено, но копия в папке отправленных не сохранена.'
             except MailError:warning+=' Письмо отправлено, но копия в папке отправленных не сохранена.'
         else:warning+=' Письмо отправлено. Папка отправленных не определена сервером.'
+        self.next_due[str(account['id'])]=0
         return {'sent':True,'warning':warning}
 
     def start(self):
@@ -472,7 +524,11 @@ class Mailbox:
             self.next_due[key]=now+60;self.inflight[key]=self.pool.submit(self.sync_account,account)
 
     def sync_account(self,account):
-        for folder in (account.get('settings') or {}).get('sync_folders',['INBOX']):
+        folders=list((account.get('settings') or {}).get('sync_folders',['INBOX']))
+        # Sent copies are required to show the employee's own replies in a conversation.
+        current=self.account(account['employee_id'],account['id'])
+        folders+= [f['id'] for f in current['folders'] if f.get('sent') and f['id'] not in folders]
+        for folder in folders:
             if self.stopping.is_set():return
             try:self.sync(account['employee_id'],account['id'],folder)
             except Exception:pass

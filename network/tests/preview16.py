@@ -74,17 +74,27 @@ def main():
     from contextlib import contextmanager
     html=sanitize_html('<h1 style="color:#7560d0">Запрос ставки</h1><p>Добрый день! Просим рассчитать перевозку оборудования.</p><table style="width:100%;border-collapse:collapse"><tr><th>Маршрут</th><th>Груз</th></tr><tr><td style="padding:18px;background-color:#f3f0fc">Самара → Москва</td><td>12 тонн · 40 м³</td></tr></table><p>Дата погрузки: 19 октября</p><img src="https://tracker.invalid/pixel" alt="Логотип отправителя"><script>window.mailAttack=true</script>')
     with db.transaction(owner) as c:
-        c.execute("UPDATE mail_messages SET body_html=%s,content_version=1 WHERE id=%s",(html,message))
+        c.execute("UPDATE mail_messages SET body_html=%s,content_version=2 WHERE id=%s",(html,message))
         c.execute("UPDATE mail_accounts SET folders=%s WHERE id=%s",(Jsonb([{'id':'INBOX','name':'Входящие','sent':False,'delimiter':'/'},{'id':'Sent','name':'Отправленные','sent':True,'delimiter':'/'},{'id':'Clients','name':'Клиенты','sent':False,'delimiter':'/'}]),account))
-    extra_folders=[]
+    extra_folders=[];mail_demo=None
+    if os.environ.get('NEXSEARCH_PREVIEW_MAIL163')=='1':
+        from mail163_fixture import seed
+        mail_demo=seed(db,owner,account)
+        extra_folders=[f['id'] for f in mail_demo['folders'] if f['id'] not in ['INBOX','Sent','Clients']]
+        from mail163_fixture import PNG
+        app.state.mailbox.images.get=lambda employee,url,connector:(PNG,'image/png') if url=='https://images.example.invalid/logo.png' else (_ for _ in ()).throw(ValueError('Synthetic images only'))
     class DemoIMAP:
         capabilities=(b'MOVE',)
-        def list(self):return 'OK',[(b'(\\Sent)' if f=='Sent' else b'(\\HasNoChildren)')+b' "/" "'+f.encode()+b'"' for f in ['INBOX','Sent','Clients',*extra_folders]]
+        def list(self):return 'OK',[(b'(\\Sent)' if f=='Sent' else b'(\\Noselect)' if mail_demo and f=='Clients' else b'(\\HasNoChildren)')+b' "/" "'+f.encode()+b'"' for f in ['INBOX','Sent','Clients',*extra_folders]]
         def create(self,name):extra_folders.append(name.strip('"'));return 'OK',[]
         def subscribe(self,name):return 'OK',[]
-        def select(self,*args,**kw):return 'OK',[b'1']
+        def select(self,name,*args,**kw):self.folder=name.strip('"');return 'OK',[b'1']
         def response(self,*args):return 'UIDVALIDITY',[b'1']
-        def uid(self,command,*args):return ('OK',[b'1']) if command=='search' else ('OK',[])
+        def uid(self,command,*args):
+            if command=='search' and mail_demo:
+                with db.transaction(owner) as c:rows=c.execute('SELECT uid FROM mail_messages WHERE account_id=%s AND folder=%s ORDER BY uid',(account,getattr(self,'folder','INBOX'))).fetchall()
+                return 'OK',[b' '.join(str(r['uid']).encode() for r in rows)]
+            return ('OK',[b'1']) if command=='search' else ('OK',[])
     @contextmanager
     def demo_connection(a):
         from network.mailbox import MailError
@@ -101,9 +111,9 @@ def main():
         profile={'host_url':'https://127.0.0.1:9037','computer_name':'Учебная база 1.6','token':people[name]['token'],'profile':people[name]['employee']}
         bridge,agent,close=start_client(trust,HOME/('client-'+name),ROOT/'network/web',port=port,open_browser=False,profile=profile,discovery=False)
         threading.Thread(target=bridge.serve_forever,daemon=True).start();clients.append(close)
-    (HOME/'ready.json').write_text(json.dumps({'employee':'http://127.0.0.1:9038','manager':'http://127.0.0.1:9040','director':'http://127.0.0.1:9042','inn':inn(6),'company_id':str(company_ids[0])}),encoding='utf-8')
+    (HOME/'ready.json').write_text(json.dumps({'employee':'http://127.0.0.1:9038','manager':'http://127.0.0.1:9040','director':'http://127.0.0.1:9042','inn':inn(6),'company_id':str(company_ids[0]),'mail163':mail_demo}),encoding='utf-8')
     stop=HOME/'stop';stop.unlink(missing_ok=True)
-    print('NexSearch 1.6.2 demo ready: employee 9038, manager 9040, director 9042. Synthetic data only.',flush=True)
+    print('NexSearch 1.6.3 demo ready: employee 9038, manager 9040, director 9042. Synthetic data only.',flush=True)
     try:
         while not stop.exists():time.sleep(.5)
     finally:
