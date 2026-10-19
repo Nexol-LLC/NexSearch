@@ -1,8 +1,8 @@
 /* Personal mailbox workspace. Background refresh preserves the open letter. */
-const mailWS16={account:'',folder:'',selected:new Set(),unread:false,message:null,sequence:0,accountsSequence:0,alerts:'all',right:window.innerWidth>=1250,refreshing:false};
+const mailWS16={account:'',folder:'',selected:new Set(),unread:false,message:null,sequence:0,accountsSequence:0,alerts:'all',right:window.innerWidth>=1300,refreshing:false};
 const mailModes16={auto:'HTML и текст',text:'Только текст',html:'Только HTML'};
 const accountNow16=()=>mailAccounts16.find(a=>a.id===mailAccount16);
-const folderTitle16=f=>f.id.toUpperCase()==='INBOX'?'Входящие':f.name;
+const folderTitle16=f=>f.id.toUpperCase()==='INBOX'?'Входящие':f.sent?'Отправленные':({sent:'Отправленные',drafts:'Черновики',trash:'Корзина',junk:'Спам'}[f.id.toLowerCase()]||f.name);
 const mailShortDate16=v=>v?new Date(v).toLocaleDateString('ru-RU',{day:'numeric',month:'short'}):'—';
 function mailError16(error){const el=$('#mail-inline-error16');if(view==='mail'&&el){el.hidden=false;el.textContent=error.message||String(error)}else asyncError16(error)}
 function mailboxInfo16(account){return account.last_error|| (account.last_sync_at?'Обновлено '+dateFull(account.last_sync_at):'Ожидаем первую синхронизацию')}
@@ -80,7 +80,7 @@ async function mailSettings16(){const account=accountNow16();if(!account)return;
 const composeBeforeWorkspace16=composeMail16;composeMail16=async(draft={})=>{try{const accounts=(await api('/api/mail/accounts')).accounts,account=accounts.find(a=>a.id===(draft.account_id||mailAccount16))||accounts[0],signature=account?.settings?.signature||'';await composeBeforeWorkspace16({...draft,text:signature?signature+(draft.text?'\n\n'+draft.text:''):draft.text})}catch(e){asyncError16(e)}};
 
 function drawMailAlerts16(){const area=$('#mail-alerts-items16');if(!area)return;const data=alertsData16.filter(n=>mailWS16.alerts==='all'||n.kind.startsWith(mailWS16.alerts+'.'));
- area.innerHTML=data.slice(0,35).map(n=>`<button type="button" class="mail-alert-card16 ${n.read_at?'':'unread'}" data-side-alert16="${n.id}"><small>${n.kind.startsWith('mail.')?'✉ Почта':n.kind.startsWith('task.')?'✓ Задача':'⌕ Поиск'} · ${mailShortDate16(n.created_at)}</small><strong>${esc(n.title)}</strong><span>${esc(n.description)}</span></button>`).join('')||'<div class="mail-alert-empty16">Новых уведомлений нет</div>';
+ area.innerHTML=data.slice(0,35).map(n=>`<button type="button" class="mail-alert-card16 ${n.read_at?'':'unread'}" data-side-alert16="${n.id}"><small>${n.kind.startsWith('mail.')?'✉ Почта':n.kind.startsWith('task.')?'✓ Задача':n.kind.startsWith('client.')?'▥ Клиент':'⌕ Поиск'} · ${mailShortDate16(n.created_at)}</small><strong>${esc(n.title)}</strong><span>${esc(n.description)}</span></button>`).join('')||'<div class="mail-alert-empty16">Новых уведомлений нет</div>';
  area.querySelectorAll('button').forEach(b=>b.onclick=async()=>{const item=alertsData16.find(n=>n.id===b.dataset.sideAlert16);try{await api('/api/notifications/'+item.id+'/read',{method:'POST',body:'{}'});if(item.kind.startsWith('mail.')){const message=await api('/api/mail/messages/'+item.entity_id);mailAccount16=message.account_id;mailFolder16=message.folder;await loadMail16();if(view==='mail')presentMail16(message)}else if(item.kind.startsWith('task.'))await editTask14(await api('/api/tasks/'+item.entity_id));else if(item.kind==='search.finished')await show('search');await refreshNotifications16()}catch(e){mailError16(e)}});
 }
 const notificationsBeforeMailWorkspace16=refreshNotifications16;refreshNotifications16=async draw=>{await notificationsBeforeMailWorkspace16(draw);if(view==='mail')drawMailAlerts16()};

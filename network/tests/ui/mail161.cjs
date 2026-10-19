@@ -65,6 +65,6 @@ const root=path.resolve(__dirname,'../../..'),out=path.join(root,'preview/qa161-
  await page.click('#mail-unread-filter16');await page.waitForSelector('.mail-row16.unread');
  await page.click('[data-mail-alert-filter16="task"]');assert.equal(await page.locator('#mail-alerts-items16 button small').filter({hasText:'Почта'}).count(),0);
  assert.deepEqual(errors,[]);
- await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.1',passed:true,native_excel:['carriers','clients','search'],errors},null,2));
+ await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.2',passed:true,native_excel:['carriers','clients','search'],errors},null,2));
  console.log('Folders, HTML/text modes, retained reader, signature, bulk flags and notifications: passed. No JavaScript errors.');
 })().catch(async e=>{console.error(e);if(page){await page.screenshot({path:path.join(out,'failure.png')});console.error(await page.evaluate(()=>({view,heading:document.querySelector('#page-heading')?.textContent,error:document.querySelector('#editor-error')?.textContent})))}process.exitCode=1}).finally(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}});

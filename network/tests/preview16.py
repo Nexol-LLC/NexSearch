@@ -103,7 +103,7 @@ def main():
         threading.Thread(target=bridge.serve_forever,daemon=True).start();clients.append(close)
     (HOME/'ready.json').write_text(json.dumps({'employee':'http://127.0.0.1:9038','manager':'http://127.0.0.1:9040','director':'http://127.0.0.1:9042','inn':inn(6),'company_id':str(company_ids[0])}),encoding='utf-8')
     stop=HOME/'stop';stop.unlink(missing_ok=True)
-    print('NexSearch 1.6.1 demo ready: employee 9038, manager 9040, director 9042. Synthetic data only.',flush=True)
+    print('NexSearch 1.6.2 demo ready: employee 9038, manager 9040, director 9042. Synthetic data only.',flush=True)
     try:
         while not stop.exists():time.sleep(.5)
     finally:

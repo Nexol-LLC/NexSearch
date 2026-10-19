@@ -1,0 +1,48 @@
+const assert=require('node:assert/strict'),path=require('node:path'),fs=require('node:fs/promises');
+const {_electron}=require('playwright');
+const root=path.resolve(__dirname,'../../..'),out=path.join(root,'preview/qa162-ui');let app,page;const errors=[];
+(async()=>{
+ await fs.mkdir(out,{recursive:true});const ready=JSON.parse(await fs.readFile(path.join(root,'network/.runtime/preview16/ready.json'),'utf8'));
+ const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+ const launch=async role=>{
+  if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}
+  app=await _electron.launch({executablePath:path.join(root,'preview/HostWindows/desktop/runtime/electron.exe'),args:[path.join(root,'desktop/app'),'--url='+ready[role],'--profile='+path.join(out,role),'--hidden'],env});
+  page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await app.evaluate(({BrowserWindow})=>{for(const w of BrowserWindow.getAllWindows()){w.webContents.setBackgroundThrottling(false);w.setSize(1480,1000);w.showInactive()}});await page.waitForSelector('#workspace:not([hidden])');
+ };
+ await launch('employee');await page.evaluate(()=>applyAppearance162({theme:'light',density:'comfortable',motion:true},true));await page.click('[data-view="carriers"]');await page.waitForSelector('[data-carrier15]');
+ await page.locator('[data-open-carrier15]').first().click();assert.equal(await page.locator('.v-length_m').inputValue(),'13.6');assert.equal(await page.locator('.v-payload_t').inputValue(),'20');
+ assert.equal(await page.locator('.v-weight_kg,.v-location').count(),0);assert(!(await page.locator('.fleet-edit thead').innerText()).includes('кг'));
+ await page.fill('.v-payload_t','22.5');await page.fill('.v-length_m','13.7');await page.fill('#carrier-routes','Москва → Самара\nКазань ↔ Уфа');await page.screenshot({path:path.join(out,'carrier-edit-light.png'),animations:'disabled'});
+ await page.click('#save-editor');await page.waitForSelector('#editor',{state:'hidden'});
+ const fleet=await page.evaluate(async()=> (await api('/api/carriers')).carriers[0].vehicles[0]);assert.equal(fleet.payload_kg,22500);assert.equal(fleet.length_mm,13700);
+ await page.fill('#fleet-from162','Москва');await page.fill('#fleet-to162','Самара');assert.equal(await page.locator('[data-carrier15]').count(),1);
+ await page.click('#fleet-swap162');assert.equal(await page.locator('[data-carrier15]').count(),0);await page.check('#fleet-reverse162');assert.equal(await page.locator('[data-carrier15]').count(),1);
+ await page.click('#fleet-reset162');await page.fill('#fleet-from162','Уфа');await page.fill('#fleet-to162','Казань');assert.equal(await page.locator('[data-carrier15]').count(),1);await page.click('#fleet-reset162');
+ await page.screenshot({path:path.join(out,'carriers-light.png'),animations:'disabled'});
+ console.log('Metres/tonnes conversion, removed fields, route suggestions and directional filters: passed.');
+ await page.click('.sidebar-settings162');await page.waitForSelector('#settings-appearance162');await page.click('[data-theme-choice162="dark"]');
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');await page.selectOption('#appearance-density162','compact');await page.uncheck('#appearance-motion162');
+ await page.screenshot({path:path.join(out,'appearance-dark.png'),animations:'disabled'});await page.click('#close-editor');
+ await page.reload();await page.waitForSelector('#workspace:not([hidden])');await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark'&&document.documentElement.dataset.density==='compact'&&document.documentElement.dataset.motion==='reduced');
+ await page.click('[data-view="clients"]');await page.waitForSelector('.kanban-card');await page.screenshot({path:path.join(out,'clients-dark.png'),animations:'disabled'});
+ const card=page.locator('.kanban-card[data-id="'+ready.company_id+'"]');await card.click();
+ await page.click('#client-calls');await page.waitForSelector('#editor-back162');assert((await page.locator('#editor-title').innerText()).includes('История звонков'));await page.click('#editor-back162');await page.waitForSelector('#client-calls');
+ await page.click('[data-company-tab="interactions"]');await page.waitForSelector('#interaction-note162');await page.fill('#interaction-note162','ДЕМО согласовали документы');await page.click('#interaction-save162');await page.waitForFunction(()=>document.querySelector('.interaction-list162')?.textContent.includes('ДЕМО согласовали документы'));
+ await page.screenshot({path:path.join(out,'interaction-dark.png'),animations:'disabled'});await page.click('#close-editor');
+ await page.click('[data-view="tasks"]');await page.waitForSelector('#task-new');await page.click('#task-new');await page.waitForSelector('#task-company-source162');
+ await page.selectOption('#task-company-source162','found');assert.equal(await page.locator('#task-company optgroup[label="Клиенты в работе"] option').count(),0);
+ await page.selectOption('#task-company-source162','clients');await page.selectOption('#task-company',ready.company_id);await page.fill('#task-title','ДЕМО связаться после передачи');await page.fill('#task-description','Несохранённый черновик');
+ await page.click('#task-company-open162');await page.waitForSelector('#editor.company-dialog16[open]');await page.click('[data-company-tab="interactions"]');await page.waitForSelector('.interaction-list162');await page.click('#editor-back162');await page.waitForSelector('#task-title');assert.equal(await page.inputValue('#task-title'),'ДЕМО связаться после передачи');assert.equal(await page.inputValue('#task-description'),'Несохранённый черновик');
+ await page.waitForFunction(()=>!document.querySelector('#save-editor').disabled);await page.click('#save-editor');await page.waitForSelector('#editor',{state:'hidden'});
+ const row=page.locator('.task-card').filter({hasText:'ДЕМО связаться после передачи'});await row.locator('[data-task-company162]').click();await page.waitForSelector('#editor.company-dialog16[open]');assert.equal(await page.locator('#client-transfer162').count(),0);await page.click('#close-editor');
+ await page.click('[data-view="mail"]');await page.waitForSelector('#mail-items16 [data-mail-id16]');await page.screenshot({path:path.join(out,'mail-dark.png'),animations:'disabled'});
+ console.log('Saved appearance, dark kanban/mail, interaction notes, call-history back and task-company links with retained draft: passed.');
+ await launch('manager');await page.click('[data-view="team"]');await page.waitForSelector('.team-card');assert.equal(await page.locator('.team-card').count(),3);
+ await page.locator('.team-card').filter({hasText:'Анна Петрова'}).locator('[data-clients]').click();await page.waitForSelector('.kanban-card');await page.locator('.kanban-card[data-id="'+ready.company_id+'"]').click();await page.waitForSelector('#client-transfer162');
+ await page.click('[data-company-tab="interactions"]');await page.waitForSelector('.interaction-list162');assert((await page.locator('.interaction-list162').innerText()).includes('ДЕМО согласовали документы'));
+ await page.click('#client-transfer162');await page.waitForSelector('#transfer-owner162');const target=await page.locator('#transfer-owner162 option').evaluateAll(options=>options.find(o=>o.textContent.includes('Иван Орлов')).value);await page.selectOption('#transfer-owner162',target);await page.fill('#transfer-note162','ДЕМО передача с задачами');await page.screenshot({path:path.join(out,'transfer-light.png'),animations:'disabled'});await page.click('#save-editor');await page.waitForSelector('#editor',{state:'hidden'});
+ const moved=await page.evaluate(async({id,target})=>({company:await api('/api/companies/'+id),tasks:(await api('/api/tasks?employee_id='+target)).tasks}),{id:ready.company_id,target});assert.equal(moved.company.employee_id,target);assert(moved.tasks.some(t=>t.title==='ДЕМО связаться после передачи'));
+ await launch('director');await page.click('[data-view="team"]');await page.waitForSelector('.team-card');assert.equal(await page.locator('.team-card').count(),4);
+ assert.deepEqual(errors,[]);await fs.writeFile(path.join(out,'result.json'),JSON.stringify({version:'1.6.2',passed:true,errors,checks:['carrier-units','routes','appearance','timeline','task-links','atomic-transfer','leadership-scopes']},null,2));
+ console.log('Manager transfer from colleague card, moved tasks, scoped employee visibility and director access: passed. No JavaScript errors.');
+})().catch(async e=>{console.error(e);if(page){await page.screenshot({path:path.join(out,'failure.png')});console.error(await page.evaluate(()=>({view,error:document.querySelector('#editor-error')?.textContent,title:document.querySelector('#editor-title')?.textContent})))}process.exitCode=1}).finally(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}});

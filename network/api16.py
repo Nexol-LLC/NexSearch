@@ -165,7 +165,7 @@ def create_app(*args,**kwargs):
         target=employee_id or user['id']
         with db.transaction(user['id']) as c:
             can_assign(c,user,target)
-            items=c.execute('SELECT co.id,co.name FROM employee_leads l JOIN companies co ON co.id=l.company_id WHERE l.employee_id=%s ORDER BY co.name',(target,)).fetchall()
+            items=c.execute('SELECT co.id,co.name,co.inn,l.status AS lead_status,COALESCE(cl.active,false) AS is_client FROM employee_leads l JOIN companies co ON co.id=l.company_id LEFT JOIN employee_clients cl ON cl.company_id=co.id WHERE l.employee_id=%s ORDER BY co.name',(target,)).fetchall()
         return {'companies':items}
 
     @app.get('/api/tasks/{ident}')
@@ -322,4 +322,6 @@ def create_app(*args,**kwargs):
         remote=getattr(app.state,'remote_access',None)
         if not remote:raise HTTPException(503,'Модуль удалённого доступа хоста недоступен')
         return remote.login()
+    from .customer_workspace import install
+    install(app,db,employee)
     return app

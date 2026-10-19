@@ -321,12 +321,12 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
    for n,row in enumerate(rows,1):sheet.write_row(n,0,row)
    sheet.autofilter(0,0,len(rows),len(headers)-1)
    if kind=='carriers':
-    fleet=book.add_worksheet('Автомобили');fleet.write_row(0,0,['Перевозчик','Автомобиль','Тип','Где находится','Вес машины, кг','Грузоподъёмность, кг','Объём, м³','Длина, мм','Ширина, мм','Высота, мм','Примечание'],fmt);fleet.set_column(0,10,25);fleet.freeze_panes(1,1);n=0
+    fleet=book.add_worksheet('Автомобили');fleet.write_row(0,0,['Перевозчик','Автомобиль','Тип','Грузоподъёмность, т','Объём, м³','Длина, м','Ширина, м','Высота, м','Примечание'],fmt);fleet.set_column(0,8,25);fleet.freeze_panes(1,1);n=0
     from .api14 import VEHICLES
     for carrier in items:
      for v in carrier['vehicles']:
-      n+=1;fleet.write_row(n,0,[carrier['name'],v['name'],VEHICLES.get(v['kind'],v['kind']),v.get('location',''),v.get('weight_kg'),v['payload_kg'],v.get('volume_m3') or v['length_mm']*v['width_mm']*v['height_mm']/1e9,v['length_mm'],v['width_mm'],v['height_mm'],v.get('notes','')])
-    fleet.autofilter(0,0,n,10)
+      n+=1;fleet.write_row(n,0,[carrier['name'],v['name'],VEHICLES.get(v['kind'],v['kind']),v['payload_kg']/1000,v.get('volume_m3') or v['length_mm']*v['width_mm']*v['height_mm']/1e9,v['length_mm']/1000,v['width_mm']/1000,v['height_mm']/1000,v.get('notes','')])
+    fleet.autofilter(0,0,n,8)
   audit(user,'data.export',kind,{'rows':len(rows)});return Response(stream.getvalue(),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename={kind}.xlsx'})
  base=Path(web or Path(__file__).with_name('web'))
  if pack:app.mount('/pack',StaticFiles(directory=pack,html=True),name='pack')
