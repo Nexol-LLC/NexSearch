@@ -120,6 +120,42 @@ def test_schema16_upgrade_preserves_accounts_messages_and_employees(db,fake_mail
     with db.transaction(admin=True) as c:assert c.execute('SELECT 1 FROM schema_meta WHERE version=17').fetchone()
 
 
+def test_151_privileged_updater_finishes_migration_before_readonly_runtime(db):
+    from pathlib import Path
+    from uuid import uuid4
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    from network import secure_store
+    from network.database import Database
+    root=Path(__file__).resolve().parents[2]
+    cfg=secure_store.read(root/'network/.runtime/test-host/postgres.sec')
+    admin_dsn=make_conninfo(host='127.0.0.1',port=cfg['port'],user='nexol_admin',password=cfg['admin_password'],dbname='nexol')
+    role='migration_reader_'+uuid4().hex[:12]
+    with db.transaction(admin=True) as c:
+        c.execute('ALTER TABLE mail_accounts DROP COLUMN settings')
+        c.execute('ALTER TABLE mail_messages DROP COLUMN body_html,DROP COLUMN content_version')
+        c.execute('DELETE FROM schema_meta WHERE version=17')
+        # This is the exact migration list in the deployed 1.5.1 updater.
+        for name in ('schema14.sql','schema15.sql'):c.execute((root/'network'/name).read_text(encoding='utf-8'))
+    with psycopg.connect(admin_dsn,autocommit=True) as admin:
+        admin.execute(sql.SQL('CREATE ROLE {} NOLOGIN').format(sql.Identifier(role)))
+        try:
+            admin.execute(sql.SQL('GRANT {} TO nexol_app').format(sql.Identifier(role)))
+            admin.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role)))
+            admin.execute(sql.SQL('GRANT SELECT ON schema_meta TO {}').format(sql.Identifier(role)))
+            reader=Database(make_conninfo(db.pool.conninfo,options='-c role='+role))
+            try:
+                reader.initialize()  # Must finish without any DDL permissions.
+                with reader.transaction() as c:
+                    assert c.execute('SELECT 1 FROM schema_meta WHERE version=17').fetchone()
+                    assert not c.execute("SELECT has_table_privilege(current_user,'mail_accounts','UPDATE') AS allowed").fetchone()['allowed']
+            finally:reader.close()
+        finally:
+            admin.execute(sql.SQL('DROP OWNED BY {}').format(sql.Identifier(role)))
+            admin.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(role)))
+
+
 def test_cached_old_letter_still_opens_when_imap_unavailable(db,fake_mail,monkeypatch):
     from network.mailbox import MailError
     a,b=users(db);api=http(db);ident=connect(api,a)

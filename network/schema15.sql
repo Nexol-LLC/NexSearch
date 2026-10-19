@@ -69,3 +69,11 @@ DO $$ DECLARE tab text; BEGIN
  END LOOP;
 END $$;
 INSERT INTO schema_meta(version) VALUES(16) ON CONFLICT DO NOTHING;
+
+-- Installed 1.5.1 root updaters run only schema14 and schema15 from the
+-- newly signed package. Complete the 1.6.1 migration here while they still
+-- hold the schema owner role; the runtime account cannot issue ALTER TABLE.
+ALTER TABLE mail_accounts ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS body_html text NOT NULL DEFAULT '';
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS content_version integer NOT NULL DEFAULT 0;
+INSERT INTO schema_meta(version) VALUES(17) ON CONFLICT DO NOTHING;
