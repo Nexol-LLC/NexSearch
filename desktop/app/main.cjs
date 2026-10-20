@@ -1,5 +1,5 @@
 'use strict';
-const {app,BrowserWindow,WebContentsView,ipcMain,shell,session,dialog,clipboard}=require('electron');
+const {app,BrowserWindow,WebContentsView,ipcMain,shell,session,dialog,clipboard,Notification}=require('electron');
 const path=require('path');
 const {documentBytes,documentName}=require('./documents.cjs');
 app.setName('NexSearch');
@@ -12,6 +12,17 @@ const services={calculator:'https://tkblack.ru/calculator/',signl:'https://signl
 const program=argument('--program'),home=argument('--home'),role=argument('--role')==='host'?'HostWindows':'EmployeeWindows';
 let preparedUpdate=null;
 let win,active=null,views=new Map(),exiting=false;
+const notifications=new Map();
+function clearNotifications(){for(const n of notifications.values())n.close();notifications.clear();}
+function notify(value){
+ if(!value||typeof value.id!=='string'||!/^[-a-f0-9]{36}$/i.test(value.id)||typeof value.owner!=='string'||!/^[-a-f0-9]{36}$/i.test(value.owner)||typeof value.title!=='string'||value.title.length>300||typeof value.body!=='string'||value.body.length>2000)throw Error('Invalid notification');
+ if(!active&&win.isFocused()&&win.isVisible()&&!win.isMinimized()||!Notification.isSupported()||notifications.has(value.id))return false;
+ const n=new Notification({title:value.title,body:value.body,icon:path.join(__dirname,'logo.png'),silent:true});notifications.set(value.id,n);
+ n.on('click',()=>{if(win.isDestroyed())return;if(win.isMinimized())win.restore();win.show();win.focus();hide();win.webContents.send('notification:open',{id:value.id,owner:value.owner});});
+ n.on('close',()=>notifications.delete(value.id));n.on('failed',()=>notifications.delete(value.id));
+ while(notifications.size>20){const [id,old]=notifications.entries().next().value;notifications.delete(id);old.close();}
+ n.show();return true;
+}
 function allowUrl(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password;}catch{return false;}}
 function external(value){if(allowUrl(value))shell.openExternal(value);}
 function bounds(value){if(!value||['x','y','width','height'].some(k=>!Number.isFinite(value[k])))throw Error('Invalid bounds');const [w,h]=win.getContentSize();return {x:Math.max(0,Math.min(w,Math.round(value.x))),y:Math.max(0,Math.min(h,Math.round(value.y))),width:Math.max(1,Math.min(w,Math.round(value.width))),height:Math.max(1,Math.min(h,Math.round(value.height)))};}
@@ -27,15 +38,15 @@ async function show(service,rect){if(!Object.hasOwn(services,service))throw Erro
  view=new WebContentsView({webPreferences:{sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true,partition:'persist:nexsearch-services'}});
  guard(view.webContents);views.set(service,view);view.webContents.loadURL(services[service]).catch(()=>{});}
  active=view;win.contentView.addChildView(view);view.setBounds(bounds(rect));return true;}
-async function quit(){if(exiting)return;exiting=true;hide();
+async function quit(){if(exiting)return;exiting=true;hide();clearNotifications();
  try{const response=await fetch(ui.origin+'/api/connection');const info=await response.json();await fetch(ui.origin+'/api/client/exit',{method:'POST',headers:{Origin:ui.origin,'X-Nexol-CSRF':info.csrf,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(10000)});}catch{}
  for(const v of views.values())v.webContents.close();app.quit();}
 app.whenReady().then(()=>{
  if(process.platform==='darwin')app.dock?.setIcon(path.join(__dirname,'logo.png'));
  for(const s of [session.defaultSession,session.fromPartition('persist:nexsearch-services')]){s.setPermissionRequestHandler((_wc,_permission,cb)=>cb(false));s.setPermissionCheckHandler(()=>false);}
- win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.6.3',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
+ win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.6.4',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
  guard(win.webContents,true);win.on('close',event=>{if(!exiting){event.preventDefault();quit();}});
- for(const [name,fn] of Object.entries({'service:show':show,'service:hide':hide,'service:bounds':v=>active?.setBounds(bounds(v)),'service:back':()=>{if(active?.webContents.navigationHistory.canGoBack())active.webContents.navigationHistory.goBack();},'service:reload':()=>active?.webContents.reload(),'update:prepare':async()=>{
+ for(const [name,fn] of Object.entries({'notification:show':notify,'notification:clear':clearNotifications,'service:show':show,'service:hide':hide,'service:bounds':v=>active?.setBounds(bounds(v)),'service:back':()=>{if(active?.webContents.navigationHistory.canGoBack())active.webContents.navigationHistory.goBack();},'service:reload':()=>active?.webContents.reload(),'update:prepare':async()=>{
   if(process.platform!=='win32'||!program||!home)throw Error('Используйте комплект и инструкцию обновления для этой платформы');
   const selected=await dialog.showOpenDialog(win,{title:'Подписанное обновление NexSearch',filters:[{name:'ZIP',extensions:['zip']}],properties:['openFile']});if(selected.canceled)return null;
   const helper=path.join(program,'NexSearch Maintenance.exe');const child=require('child_process');

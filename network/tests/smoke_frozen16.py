@@ -48,7 +48,7 @@ def main():
         host=subprocess.Popen([str(ROOT/'dist/HostWindows/NexSearch.exe')],env=env,cwd=ROOT/'dist/HostWindows',creationflags=subprocess.CREATE_NO_WINDOW)
         wait('http://127.0.0.1:9058/api/connection',host)
         status=requests.get('http://127.0.0.1:9058/api/host/status',timeout=5);assert status.status_code==200,status.text
-        assert status.json()['version']=='1.6.3'
+        assert status.json()['version']=='1.6.4'
         trust=json.loads((host_home/'identity/host-identity.json').read_text())
         session=requests.Session();session.trust_env=False;session.mount('https://',PinnedAdapter(trust['fingerprint']))
         secret=secure_store.read(host_home/'admin.sec')
@@ -65,12 +65,14 @@ def main():
         dsn=make_conninfo(host='127.0.0.1',port=config['port'],user='nexol_app',password=config['app_password'],dbname='nexol')
         database=Database(dsn)
         item={'inn':'7700000062','name':'ДЕМО compiled 1.6','region':'Самарская область','source':'Учебный источник','source_url':'https://example.org/smoke16','phones':[],'emails':[],'verification':{'active':True,'checked_at':datetime.now(timezone.utc).isoformat()},'financial':{}}
-        company,_,_=database.ingest(item,ident);database.close()
+        company,_,_=database.ingest(item,ident)
+        with database.transaction(admin=True) as c:assert c.execute('SELECT 1 FROM schema_meta WHERE version=19').fetchone()
+        database.close()
         employee_env={**env,'NEXOL_HOME':str(employee_home),'NEXOL_UI_PORT':'9060'}
         employee=subprocess.Popen([str(ROOT/'dist/EmployeeWindows/NexSearch.exe')],env=employee_env,cwd=ROOT/'dist/EmployeeWindows',creationflags=subprocess.CREATE_NO_WINDOW)
         wait('http://127.0.0.1:9060/api/connection',employee)
         ui='http://127.0.0.1:9060'
-        index=requests.get(ui,timeout=5).text;assert '1.6.3' in index and 'workspace16.js' in index and 'mail_workspace16.js' in index and 'appearance.js' in index and 'customer_workspace.js' in index
+        index=requests.get(ui,timeout=5).text;assert '1.6.4' in index and 'workspace16.js' in index and 'mail_workspace16.js' in index and 'appearance.js' in index and 'customer_workspace.js' in index
         data=requests.get(ui+'/api/leads',timeout=5).json()['companies'];assert data[0]['company_time']['utc_offset']==4
         assert requests.get(ui+'/api/mail/accounts',timeout=5).json()['accounts']==[]
         card=requests.get(ui+'/api/companies/'+str(company),timeout=5);assert card.status_code==200 and card.json()['inn']==item['inn']
@@ -79,6 +81,10 @@ def main():
         assert 'vpn16.js' in index
         assert requests.get(ui+'/assets/vpn16.js',timeout=5).status_code==200
         csrf=requests.get(ui+'/api/connection',timeout=5).json()['csrf'];headers={'Origin':ui,'X-Nexol-CSRF':csrf}
+        assert requests.get(ui+'/assets/workspace164.js',timeout=5).status_code==200
+        assert requests.get(ui+'/pack/src/readiness164.js',timeout=5).status_code==200
+        carrier=requests.post(ui+'/api/carriers/save',headers=headers,json={'name':'Compiled carrier 164','inn':'7700000062'},timeout=5)
+        assert carrier.status_code==200 and carrier.json()['inn']=='7700000062',carrier.text
         if os.environ.get('NEXSEARCH_TEST_VPN')=='1':
             enabled=requests.post(ui+'/api/client/vpn/config',headers=headers,json={'enabled':True,'provider':'tailscale'},timeout=10)
             assert enabled.status_code==200,enabled.text
@@ -93,8 +99,10 @@ def main():
         task=requests.post(ui+'/api/tasks',headers=headers,json={'title':'Compiled task 1.6','due_at':(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()},timeout=5)
         assert task.status_code==200,task.text
         assert requests.get(ui+'/api/notifications',timeout=5).json()['unread']>=1
+        assert requests.post(ui+'/api/notifications/clear',headers=headers,json={},timeout=5).status_code==200
+        assert requests.get(ui+'/api/notifications',timeout=5).json()['unread']==0
         print('Compiled HostWindows and EmployeeWindows: startup, PostgreSQL migration, timezone assets, mail routes, tasks, notifications passed (VPN onboarding is opt-in).',flush=True)
-        (base/'result.json').write_text(json.dumps({'version':'1.6.3','compiled_host':True,'compiled_employee':True,'schema':18,'passed':True,'test_home':str(home)}),encoding='utf-8')
+        (base/'result.json').write_text(json.dumps({'version':'1.6.4','compiled_host':True,'compiled_employee':True,'schema':19,'passed':True,'test_home':str(home)}),encoding='utf-8')
     finally:
         try:stop('http://127.0.0.1:9060',employee)
         finally:
