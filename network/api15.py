@@ -76,13 +76,14 @@ def create_app(*args,**kwargs):
  def save_carrier(body:CarrierSave,user=Depends(employee)):
   if not body.name.strip():raise ValueError('Укажите наименование')
   with db.transaction(user['id']) as c:
-   fields=('name','contacts','routes','description','phone','email','work_terms','vat_mode','vat_rate','regions')
+   fields=('name','inn','contacts','routes','description','phone','email','work_terms','vat_mode','vat_rate','regions')
+   if body.id and 'inn' not in body.model_fields_set:fields=tuple(k for k in fields if k!='inn')
    values=[getattr(body,k).strip() if isinstance(getattr(body,k),str) else getattr(body,k) for k in fields]+[Jsonb([v.model_dump() for v in body.vehicles])]
    if body.id:
     row=c.execute('UPDATE carriers SET '+','.join(k+'=%s' for k in (*fields,'vehicles'))+',updated_by=%s,revision=revision+1,updated_at=now() WHERE id=%s AND revision=%s RETURNING *',(*values,user['id'],body.id,body.revision)).fetchone()
     if not row:raise HTTPException(409,'Карточка изменена другим сотрудником. Откройте её снова.')
    else:
-    row=c.execute('INSERT INTO carriers(id,'+','.join((*fields,'vehicles'))+',created_by,updated_by) VALUES('+','.join(['%s']*14)+') RETURNING *',(uuid4(),*values,user['id'],user['id'])).fetchone()
+    row=c.execute('INSERT INTO carriers(id,'+','.join((*fields,'vehicles'))+',created_by,updated_by) VALUES('+','.join(['%s']*(len(fields)+4))+') RETURNING *',(uuid4(),*values,user['id'],user['id'])).fetchone()
   db.audit(user['id'],'carrier.update' if body.id else 'carrier.create',row['id'],body.model_dump(mode='json'));return row
  @app.get('/api/search/schedules')
  def schedules(user=Depends(employee)):

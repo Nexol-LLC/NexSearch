@@ -90,10 +90,14 @@ function sceneInit(container, api) {
 
   sceneResize(container);
   window.addEventListener('resize', () => sceneResize(container));
+  new ResizeObserver(() => sceneResize(container)).observe(container);
+  _canvasEl.addEventListener('webglcontextlost',event=>{event.preventDefault();window.NexPackStatus?.('context-lost')});
+  _canvasEl.addEventListener('webglcontextrestored',()=>{sceneResize(container);window.NexPackStatus?.('ready')});
 }
 
 function sceneResize(container) {
-  const w = container.clientWidth, h = container.clientHeight || 400;
+  const w = container.clientWidth, h = container.clientHeight;
+  if (!w || !h) return;
   _renderer.setSize(w, h);
   _camera.aspect = w / h;
   _camera.updateProjectionMatrix();

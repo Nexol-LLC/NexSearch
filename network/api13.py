@@ -34,6 +34,16 @@ class StageList(Input):stages:list[str]=Field(max_length=40)
 class Route(Input):
  origin:str=Field(default='',max_length=200);destination:str=Field(default='',max_length=200);cargo:str=Field(default='',max_length=500);weight_kg:float|None=Field(default=None,ge=0,le=1_000_000);revision:int=Field(ge=0)
 class Carrier(Input):
+ inn:str=Field(default='',max_length=12)
+ @field_validator('inn')
+ @classmethod
+ def carrier_inn(cls,value):
+  value=value.strip()
+  if value:
+   if not re.fullmatch(r'[0-9]{10}|[0-9]{12}',value):raise ValueError('ИНН должен содержать 10 или 12 цифр')
+   weights=([2,4,10,3,5,9,4,6,8],) if len(value)==10 else ([7,2,4,10,3,5,9,4,6,8],[3,7,2,4,10,3,5,9,4,6,8])
+   if any(sum(int(d)*w for d,w in zip(value,ws))%11%10!=int(value[len(ws)]) for ws in weights):raise ValueError('Проверьте контрольные цифры ИНН')
+  return value
  phone:str=Field(default='',max_length=200);email:str=Field(default='',max_length=300);work_terms:str=Field(default='',max_length=5000);vat_mode:str=Field(default='unknown',pattern='^(unknown|included|without)$');vat_rate:float|None=Field(default=None,ge=0,le=100)
  name:str=Field(min_length=1,max_length=500);contacts:str=Field(default='',max_length=5000);routes:str=Field(default='',max_length=5000);description:str=Field(default='',max_length=10000);revision:int|None=None
 class Plan(Input):name:str=Field(min_length=1,max_length=200);project:dict;revision:int|None=None
@@ -202,7 +212,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
   with db.transaction(user['id']) as conn:return {'carriers':conn.execute("SELECT c.*,e.first_name||' '||e.last_name AS author FROM carriers c JOIN employees e ON e.id=c.created_by ORDER BY c.updated_at DESC").fetchall()}
  @app.post('/api/carriers')
  def add_carrier(body:Carrier,user=Depends(employee)):
-  with db.transaction(user['id']) as conn:row=conn.execute('INSERT INTO carriers(id,name,contacts,routes,description,phone,email,work_terms,vat_mode,vat_rate,created_by,updated_by) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *',(uuid4(),body.name.strip(),body.contacts,body.routes,body.description,body.phone,body.email,body.work_terms,body.vat_mode,body.vat_rate,user['id'],user['id'])).fetchone()
+  with db.transaction(user['id']) as conn:row=conn.execute('INSERT INTO carriers(id,name,inn,contacts,routes,description,phone,email,work_terms,vat_mode,vat_rate,created_by,updated_by) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *',(uuid4(),body.name.strip(),body.inn,body.contacts,body.routes,body.description,body.phone,body.email,body.work_terms,body.vat_mode,body.vat_rate,user['id'],user['id'])).fetchone()
   audit(user,'carrier.create',row['id'],body.model_dump(exclude={'revision'}));return row
  @app.patch('/api/carriers/{ident}')
  def edit_carrier(ident:UUID,body:Carrier,user=Depends(employee)):
@@ -210,7 +220,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
    old=conn.execute('SELECT * FROM carriers WHERE id=%s FOR UPDATE',(ident,)).fetchone()
    if not old:raise NotFound('Перевозчик не найден')
    if old['revision']!=body.revision:raise Conflict('Перевозчик изменён другим сотрудником')
-   row=conn.execute('UPDATE carriers SET name=%s,contacts=%s,routes=%s,description=%s,phone=%s,email=%s,work_terms=%s,vat_mode=%s,vat_rate=%s,updated_by=%s,revision=revision+1,updated_at=now() WHERE id=%s RETURNING *',(body.name.strip(),body.contacts,body.routes,body.description,*[getattr(body,k) if k in body.model_fields_set else old[k] for k in ('phone','email','work_terms','vat_mode','vat_rate')],user['id'],ident)).fetchone()
+   row=conn.execute('UPDATE carriers SET name=%s,inn=%s,contacts=%s,routes=%s,description=%s,phone=%s,email=%s,work_terms=%s,vat_mode=%s,vat_rate=%s,updated_by=%s,revision=revision+1,updated_at=now() WHERE id=%s RETURNING *',(body.name.strip(),body.inn if 'inn' in body.model_fields_set else old['inn'],body.contacts,body.routes,body.description,*[getattr(body,k) if k in body.model_fields_set else old[k] for k in ('phone','email','work_terms','vat_mode','vat_rate')],user['id'],ident)).fetchone()
   audit(user,'carrier.update',ident,body.model_dump(exclude={'revision'}));return row
  @app.get('/api/plans')
  def plans(user=Depends(employee)):
@@ -309,7 +319,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
  @app.get('/api/export/{kind}')
  def export(kind:str,user=Depends(employee)):
   if kind=='carriers':
-   items=carriers(user)['carriers'];headers=['Наименование','Телефон','Почта','Условия работы','НДС','Ставка НДС, %','Другие контакты','Маршруты','Описание','Регионы работы'];rows=[[r['name'],r['phone'],r['email'],r['work_terms'],{'included':'НДС включён','without':'Без НДС','unknown':'Не уточнён'}.get(r['vat_mode'],r['vat_mode']),float(r['vat_rate']) if r['vat_rate'] is not None else None,r['contacts'],r['routes'],r['description'],r['regions']] for r in items]
+   items=carriers(user)['carriers'];headers=['Наименование','ИНН','Телефон','Почта','Условия работы','НДС','Ставка НДС, %','Другие контакты','Маршруты','Описание','Регионы работы'];rows=[[r['name'],r['inn'],r['phone'],r['email'],r['work_terms'],{'included':'НДС включён','without':'Без НДС','unknown':'Не уточнён'}.get(r['vat_mode'],r['vat_mode']),float(r['vat_rate']) if r['vat_rate'] is not None else None,r['contacts'],r['routes'],r['description'],r['regions']] for r in items]
   elif kind in ('leads','clients'):
    items=leads(user)['companies'] if kind=='leads' else clients(user=user)['companies'];headers=['Наименование','ИНН','Регион','Телефоны','Почта','Сайт','Источник','Юр. статус','Статус работы','Звонок','Этап','Откуда','Куда','Год отчёта','Выручка, ₽','Прибыль, ₽','Капитал, ₽','Транспортный налог, ₽','Год налога','Адрес','ОГРН','КПП','Проверка','Сегмент'];rows=[]
    for r in items:

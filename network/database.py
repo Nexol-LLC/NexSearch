@@ -29,7 +29,10 @@ class Database:
     def initialize(self):
         with self.transaction(admin=True) as db:
             ready=db.execute("SELECT to_regclass('public.schema_meta') AS ready").fetchone()['ready']
-            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=18').fetchone():return
+            if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=18').fetchone():
+                if not db.execute('SELECT 1 FROM schema_meta WHERE version=19').fetchone():
+                    db.execute(Path(__file__).with_name('schema19.sql').read_text(encoding='utf-8'))
+                return
             if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=17').fetchone():
                 db.execute(Path(__file__).with_name('schema18.sql').read_text(encoding='utf-8'));return
             if ready and db.execute('SELECT 1 FROM schema_meta WHERE version=16').fetchone():

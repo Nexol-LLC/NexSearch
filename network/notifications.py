@@ -1,6 +1,8 @@
 """Private, persistent notifications; one reminder per task and due time."""
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+import logging
+import threading
 
 def notify(conn,owner,kind,title,description='',entity='',key=''):
     return conn.execute('''INSERT INTO notifications(id,employee_id,kind,title,description,entity_id,dedupe_key)
@@ -20,3 +22,38 @@ def search_notifications(db,owner):
         for job in jobs:
             title='Поиск завершён' if job['status'] in ('completed','partial') else 'Поиск остановлен' if job['status']=='stopped' else 'Ошибка поиска'
             notify(c,owner,'search.finished',title,f"Найдено компаний: {job['added']}. "+(job['message'] or ''),job['id'],f"search:{job['id']}:finished")
+
+
+def overdue_escalations(db,recipient=None):
+    """Independent of the executor being online. Never cross department boundaries.
+
+    A retained dedupe key also prevents cleared alerts from coming back. A changed
+    deadline creates a new escalation; completed tasks cannot create new alerts.
+    """
+    with db.transaction(admin=True) as c:
+        rows=c.execute('''INSERT INTO notifications(id,employee_id,kind,title,description,entity_id,dedupe_key)
+          SELECT gen_random_uuid(),boss.id,'task.overdue',left('Просрочена задача: '||t.title,300),
+            left(e.first_name||' '||e.last_name||E'\nСрок: '||to_char(t.due_at AT TIME ZONE 'Europe/Moscow','DD.MM.YYYY HH24:MI')||' МСК'||E'\n'||t.description,2000),
+            t.id::text,'overdue:'||t.id::text||':'||extract(epoch FROM t.due_at)::text
+          FROM followup_tasks t JOIN employees e ON e.id=t.employee_id
+          JOIN employees boss ON boss.active AND boss.approved AND
+            (boss.role='director' OR (boss.role='manager' AND boss.department=e.department))
+          WHERE t.status='open' AND t.due_at<now() AND e.role='logist' AND e.active AND e.approved
+            AND (%s::uuid IS NULL OR boss.id=%s::uuid)
+          ON CONFLICT(employee_id,dedupe_key) DO NOTHING RETURNING employee_id''',(recipient,recipient)).fetchall()
+    for owner in {r['employee_id'] for r in rows}:db.events.publish(owner,'notification.created')
+
+
+class ReminderWorker:
+    def __init__(self,db):
+        self.db=db;self.closed=threading.Event();self.thread=None
+    def start(self):
+        self.thread=threading.Thread(target=self.run,name='task-escalations',daemon=True);self.thread.start()
+    def run(self):
+        while not self.closed.is_set():
+            try:overdue_escalations(self.db)
+            except Exception:logging.getLogger(__name__).exception('Cannot generate overdue task reminders')
+            self.closed.wait(30)
+    def close(self):
+        self.closed.set()
+        if self.thread:self.thread.join(timeout=3)

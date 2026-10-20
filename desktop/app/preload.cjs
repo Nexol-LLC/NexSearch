@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('NexDesktop',Object.freeze({
  exportXlsx:(bytes,name)=>ipcRenderer.invoke('document:xlsx',bytes,name),
  saveFile:(bytes,name)=>ipcRenderer.invoke('document:file',bytes,name),
  copy:text=>ipcRenderer.invoke('clipboard:write',text),
+ notify:value=>ipcRenderer.invoke('notification:show',value),
+ clearNotifications:()=>ipcRenderer.invoke('notification:clear'),
+ onNotification:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('notification:open',listener);return ()=>ipcRenderer.removeListener('notification:open',listener)},
  quit:()=>ipcRenderer.invoke('application:quit')
 }));

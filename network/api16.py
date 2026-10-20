@@ -16,7 +16,7 @@ from .api14 import Task
 from .checko import VerificationUnavailable
 from .database import NotFound, Conflict
 from .mailbox import Mailbox, ACCOUNT_FIELDS, MESSAGE_FIELDS, MailError
-from .notifications import notify, task_reminders, search_notifications
+from .notifications import notify, task_reminders, search_notifications, overdue_escalations, ReminderWorker
 
 def email_address(value):
     value=value.strip().lower()
@@ -106,6 +106,7 @@ class SendMail(Input):
 def create_app(*args,**kwargs):
     app=base_app(*args,**kwargs);db=app.state.db;auth=app.state.auth
     mail=app.state.mailbox=Mailbox(db)
+    reminders=app.state.reminders=ReminderWorker(db)
     @app.exception_handler(RequestValidationError)
     async def validation_error(_,error):
         # Pydantic's default response echoes the invalid input, which may be a
@@ -122,9 +123,9 @@ def create_app(*args,**kwargs):
     @asynccontextmanager
     async def lifespan(application):
         async with old_lifespan(application):
-            if kwargs.get('start_worker',True):mail.start()
+            if kwargs.get('start_worker',True):mail.start();reminders.start()
             try:yield
-            finally:mail.close()
+            finally:reminders.close();mail.close()
     app.router.lifespan_context=lifespan
 
     @app.post('/api/search/inn')
@@ -216,11 +217,27 @@ def create_app(*args,**kwargs):
     @app.get('/api/notifications')
     def notifications(user=Depends(employee)):
         task_reminders(db,user['id'])
+        if user['role'] in ('manager','director'):overdue_escalations(db,user['id'])
         search_notifications(db,user['id'])
         with db.transaction(user['id']) as c:
-            items=c.execute('SELECT * FROM notifications WHERE employee_id=%s ORDER BY created_at DESC LIMIT 100',(user['id'],)).fetchall()
-            count=c.execute('SELECT count(*) AS n FROM notifications WHERE employee_id=%s AND read_at IS NULL',(user['id'],)).fetchone()['n']
+            items=c.execute('SELECT * FROM notifications WHERE employee_id=%s AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100',(user['id'],)).fetchall()
+            count=c.execute('SELECT count(*) AS n FROM notifications WHERE employee_id=%s AND read_at IS NULL AND deleted_at IS NULL',(user['id'],)).fetchone()['n']
         return {'notifications':items,'unread':count,'server_time':datetime.now(timezone.utc)}
+    @app.post('/api/notifications/clear')
+    def clear_notifications(user=Depends(employee)):
+        task_reminders(db,user['id'])
+        search_notifications(db,user['id'])
+        if user['role'] in ('manager','director'):overdue_escalations(db,user['id'])
+        with db.transaction(user['id']) as c:
+            c.execute('UPDATE notifications SET deleted_at=now(),read_at=COALESCE(read_at,now()) WHERE employee_id=%s AND deleted_at IS NULL',(user['id'],))
+        db.audit(user['id'],'notifications.clear')
+        return {'ok':True}
+    @app.delete('/api/notifications/{ident}')
+    def delete_notification(ident:UUID,user=Depends(employee)):
+        with db.transaction(user['id']) as c:
+            row=c.execute('UPDATE notifications SET deleted_at=COALESCE(deleted_at,now()),read_at=COALESCE(read_at,now()) WHERE id=%s AND employee_id=%s RETURNING id',(ident,user['id'])).fetchone()
+        if not row:raise NotFound('Уведомление недоступно')
+        return {'ok':True}
     @app.post('/api/notifications/read-all')
     def read_all(user=Depends(employee)):
         with db.transaction(user['id']) as c:c.execute('UPDATE notifications SET read_at=now() WHERE employee_id=%s AND read_at IS NULL',(user['id'],))
