@@ -52,7 +52,7 @@ class Role(Input):role:str=Field(pattern=r'^(logist|manager|director)$')
 class Legacy(Input):companies:list[dict]=Field(max_length=200)
 class Setting(Input):checko_api_key:str|None=Field(default=None,max_length=200)
 class Activity(Input):
- kind:str=Field(pattern=r'^(view\.(search|clients|carriers|pack|team|history|rates|maps|tools|vat)|company\.view|external\.(calculator|signl|yandex|2gis|scales|cargo|tracking|clock|optimus)|route\.use|session\.exit|view\.(today|orders|tasks)|order\.view)$')
+ kind:str=Field(pattern=r'^(view\.(search|clients|carriers|pack|team|history|rates|maps|tools|vat)|company\.view|external\.(calculator|signl|yandex|2gis|scales|cargo|tracking|clock|pdf|optimus)|route\.use|session\.exit|view\.(today|orders|tasks)|order\.view)$')
  entity:str=Field(default='',max_length=100);details:dict=Field(default_factory=dict)
 class Quote(Input):
  origin:str=Field(min_length=1,max_length=200);destination:str=Field(min_length=1,max_length=200);vehicle:str=Field(default='',max_length=200)
@@ -121,7 +121,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
  @app.get('/api/host-info')
  def host_info():return dict(app='nexsearch-host',protocol=1,version=VERSION,host_id=os.environ.get('NEXOL_HOST_ID','development'))
  @app.get('/api/catalog')
- def catalog():return dict(roles=ROLES,sectors=[{'code':k,'name':v} for k,v in DIVISIONS.items()],segments=[dict(id=k,**v) for k,v in SEGMENTS.items()])
+ def catalog():return dict(timezones=[{'offset':h,'label':f'UTC+{h} · МСК'+(f'{h-3:+d}' if h!=3 else '')} for h in range(2,13)],roles=ROLES,sectors=[{'code':k,'name':v} for k,v in DIVISIONS.items()],segments=[dict(id=k,**v) for k,v in SEGMENTS.items()])
  @app.post('/api/auth/register')
  def register(body:Register,request:Request):
   throttle(request,'register')

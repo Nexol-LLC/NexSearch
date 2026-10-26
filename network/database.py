@@ -59,7 +59,8 @@ class Database:
     def ingest(self,item,employee=None,processing=False,job=None):
         """A global company identity and a permanent, unique employee reservation."""
         # Working contacts are written only by the authenticated contact editor.
-        item={key:value for key,value in item.items() if key!='contact_overrides'}
+        item={key:value for key,value in item.items() if key not in ('contact_overrides','timezone_utc_offset')}
+        from .company_time import company_time
         from collector import identities,signatures,valid_inn,unique_phones
         keys=identities(item);weak=signatures(item)
         if not keys and not weak:raise ValueError('Нет идентификаторов компании')
@@ -86,9 +87,11 @@ class Database:
                 payload.setdefault('sources',[])
                 provenance={'name':item.get('source',''),'url':item.get('source_url','')}
                 if provenance not in payload['sources']:payload['sources'].append(provenance)
+                payload['timezone_utc_offset']=company_time(payload)['utc_offset']
                 db.execute('UPDATE companies SET inn=COALESCE(inn,%s),payload=%s,updated_at=now() WHERE id=%s',(inn,Jsonb(payload),ident))
             else:
                 ident=uuid4();payload=dict(item);payload['sources']=[{'name':item.get('source',''),'url':item.get('source_url','')}]
+                payload['timezone_utc_offset']=company_time(payload)['utc_offset']
                 db.execute('INSERT INTO companies(id,name,inn,payload) VALUES(%s,%s,%s,%s)',(ident,item['name'],inn,Jsonb(payload)))
             for key in keys:db.execute('INSERT INTO company_identities VALUES(%s,%s) ON CONFLICT DO NOTHING',(key,ident))
             for key in weak:db.execute('INSERT INTO company_signatures VALUES(%s,%s) ON CONFLICT DO NOTHING',(key,ident))
@@ -105,9 +108,24 @@ class Database:
             if job and allowed and (assigned if employee else is_new):db.execute('UPDATE jobs SET added=added+1 WHERE id=%s',(job,))
             return ident,is_new,assigned
 
+    def refresh_timezones(self):
+        """Backfill older free companies before SQL LIMIT; avoid starving a selected zone.
+
+        The computed offset is internal JSON metadata, never trusted from a source.
+        Existing JSON rows need no DDL migration or change of ownership.
+        """
+        from .company_time import company_time
+        while True:
+            with self.transaction(admin=True) as db:
+                rows=db.execute("SELECT c.id,c.payload FROM companies c WHERE NOT (c.payload ? 'timezone_utc_offset') AND NOT EXISTS(SELECT 1 FROM employee_leads l WHERE l.company_id=c.id) ORDER BY c.id LIMIT 500 FOR UPDATE OF c SKIP LOCKED").fetchall()
+                if not rows:return
+                for row in rows:
+                    db.execute("UPDATE companies SET payload=jsonb_set(payload,'{timezone_utc_offset}',%s) WHERE id=%s",(Jsonb(company_time(row['payload'])['utc_offset']),row['id']))
+
     def claim_available(self,employee,limit,job=None,criteria=None):
         from .criteria import matches,sql_filter
         filters,args=sql_filter(criteria)
+        if criteria and criteria.get('timezones'):self.refresh_timezones()
         with self.transaction(admin=True) as db:
             if job:
                 current=db.execute('SELECT target,added,stop_requested,status FROM jobs WHERE id=%s FOR UPDATE',(job,)).fetchone()

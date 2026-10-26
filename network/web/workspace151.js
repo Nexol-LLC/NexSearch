@@ -16,10 +16,12 @@ editCompany=company=>{
   const listed=rows.find(row=>row.id===company.id);if(listed)Object.assign(listed,updated);
   if(['search','clients'].includes(view))render();
   for(const [label,values] of [['Телефоны',company.phones],['Почта',company.emails]]){
-   const row=$$('#editor-body > .detail').find(row=>row.firstElementChild.textContent===label);
+   const row=$$('#editor-body .detail').find(row=>row.firstElementChild.textContent===label);
    const html=detail(label,values.join('\n'));
-   if(row){const template=document.createElement('template');template.innerHTML=html;row.innerHTML=template.content.firstElementChild.innerHTML}
-   else if(html){form.insertAdjacentHTML('beforebegin',html);if(form.previousElementSibling&&document.querySelector('.company-dialog16')){form.previousElementSibling.dataset.companyTab16='overview';form.previousElementSibling.hidden=true}}
+   if(row&&!html)row.remove();
+   else if(row){const template=document.createElement('template');template.innerHTML=html;row.innerHTML=template.content.firstElementChild.innerHTML}
+   else if(html)form.insertAdjacentHTML('beforebegin',html);
+   if(label==='Почта'&&values.length){const mailRow=$$('#editor-body .detail').find(n=>n.firstElementChild?.textContent==='Почта');if(mailRow){const button=document.createElement('button');button.type='button';button.className='mail-write-company16';button.textContent='Написать';button.onclick=()=>composeMail16({to:company.emails});mailRow.lastElementChild.append(button)}}
   }
   $('#working-phones151').value=company.phones.join('\n');$('#working-emails151').value=company.emails.join('\n');
   $('#contacts-state151').textContent='Контакты сохранены';

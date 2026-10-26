@@ -1,6 +1,6 @@
 """Compact list payloads; complete financial records are fetched on opening a card."""
 def summary(item):
- result=dict(item);result.pop('checko_company',None)
+ result=dict(item);result.pop('checko_company',None);result.pop('timezone_utc_offset',None)
  from .company_time import company_time
  result['company_time']=company_time(result)
  contacts=result.get('contact_overrides')
