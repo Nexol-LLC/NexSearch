@@ -21,10 +21,16 @@ class Criteria(BaseModel):
  turnover_segments:list[str]=Field(default_factory=list,max_length=4)
  primary_activity_only:bool=True
  region:str=Field(default='',max_length=150)
+ timezones:list[int]=Field(default_factory=list,max_length=11)
  keywords:str=Field(default='',max_length=200)
  require_contacts:bool=False
  company_count:int=Field(default=10,ge=1,le=50)
  report_year:int|None=Field(default=None,ge=2011,le=2100)
+ @field_validator('timezones')
+ @classmethod
+ def timezones_valid(cls,values):
+  if any(v not in range(2,13) for v in values):raise ValueError('Неизвестный часовой пояс: выберите UTC+2 — UTC+12')
+  return sorted(set(values))
  @field_validator('sectors')
  @classmethod
  def sectors_valid(cls,values):
@@ -45,6 +51,9 @@ def matches(item,criteria):
   if not c.primary_activity_only:codes+=checks.get('additional_okved',[])
   if not any(code[:2] in c.sectors for code in codes):return False
  if c.region and c.region.casefold() not in str(item.get('region','')).casefold():return False
+ if c.timezones:
+  from .company_time import company_time
+  if company_time(item)['utc_offset'] not in c.timezones:return False
  if c.keywords and c.keywords.casefold() not in (' '.join(str(item.get(k,'')) for k in ('name','description','segment'))).casefold():return False
  if c.require_contacts and not(item.get('phones') or item.get('emails')):return False
  year=str(c.report_year or financial.get('year') or '')
@@ -57,6 +66,7 @@ def matches(item,criteria):
 def sql_filter(criteria):
  c=Criteria(**(criteria or {}));clauses=[];args=[]
  if c.region:clauses.append("c.payload->>'region' ILIKE %s");args.append('%'+c.region+'%')
+ if c.timezones:clauses.append("(c.payload->>'timezone_utc_offset')::smallint=ANY(%s)");args.append(c.timezones)
  if c.keywords:clauses.append("concat_ws(' ',c.name,c.payload->>'description',c.payload->>'segment') ILIKE %s");args.append('%'+c.keywords+'%')
  if c.require_contacts:clauses.append("(jsonb_array_length(COALESCE(c.payload->'phones','[]'))>0 OR jsonb_array_length(COALESCE(c.payload->'emails','[]'))>0)")
  if c.sectors:

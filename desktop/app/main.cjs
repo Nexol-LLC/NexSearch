@@ -2,13 +2,14 @@
 const {app,BrowserWindow,WebContentsView,ipcMain,shell,session,dialog,clipboard,Notification}=require('electron');
 const path=require('path');
 const {documentBytes,documentName}=require('./documents.cjs');
+const {externalUrl}=require('./links.cjs');
 app.setName('NexSearch');
 if(process.platform==='win32')app.setAppUserModelId('ru.nexsearch.v13');
 const argument=key=>process.argv.find(a=>a.startsWith(key+'='))?.slice(key.length+1);
 const ui=new URL(argument('--url')||'http://127.0.0.1:8765');
 if(ui.protocol!=='http:'||ui.hostname!=='127.0.0.1'||ui.pathname!=='/')throw Error('Invalid local interface');
 if(argument('--profile'))app.setPath('userData',argument('--profile'));
-const services={calculator:'https://tkblack.ru/calculator/',signl:'https://signl.ru/',yandex:'https://yandex.ru/maps/','2gis':'https://2gis.ru/moscow/directions/tab/truck',scales:'https://nerudas.ru/vesy-platon',cargo:'https://routes.cargo.run/',tracking:'https://1track.ru/tracking',clock:'https://www.timeserver.ru/countries/ru',optimus:'https://optimus.mts.ru/'};
+const services={calculator:'https://tkblack.ru/calculator/',signl:'https://signl.ru/',yandex:'https://yandex.ru/maps/','2gis':'https://2gis.ru/moscow/directions/tab/truck',scales:'https://nerudas.ru/vesy-platon',cargo:'https://routes.cargo.run/',tracking:'https://1track.ru/tracking',clock:'https://www.timeserver.ru/countries/ru',pdf:'https://www.ilovepdf.com/ru/split_pdf#split,extract',optimus:'https://optimus.mts.ru/'};
 const program=argument('--program'),home=argument('--home'),role=argument('--role')==='host'?'HostWindows':'EmployeeWindows';
 let preparedUpdate=null;
 let win,active=null,views=new Map(),exiting=false;
@@ -24,7 +25,7 @@ function notify(value){
  n.show();return true;
 }
 function allowUrl(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password;}catch{return false;}}
-function external(value){if(allowUrl(value))shell.openExternal(value);}
+function external(value){const url=externalUrl(value);if(url)shell.openExternal(url).catch(()=>{});}
 function bounds(value){if(!value||['x','y','width','height'].some(k=>!Number.isFinite(value[k])))throw Error('Invalid bounds');const [w,h]=win.getContentSize();return {x:Math.max(0,Math.min(w,Math.round(value.x))),y:Math.max(0,Math.min(h,Math.round(value.y))),width:Math.max(1,Math.min(w,Math.round(value.width))),height:Math.max(1,Math.min(h,Math.round(value.height)))};}
 function trusted(event){if(event.sender!==win.webContents||event.senderFrame.url!==ui.href)throw Error('Untrusted caller');}
 function hide(){if(active){win.contentView.removeChildView(active);active=null;}}
@@ -44,7 +45,7 @@ async function quit(){if(exiting)return;exiting=true;hide();clearNotifications()
 app.whenReady().then(()=>{
  if(process.platform==='darwin')app.dock?.setIcon(path.join(__dirname,'logo.png'));
  for(const s of [session.defaultSession,session.fromPartition('persist:nexsearch-services')]){s.setPermissionRequestHandler((_wc,_permission,cb)=>cb(false));s.setPermissionCheckHandler(()=>false);}
- win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.6.4',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
+ win=new BrowserWindow({width:1440,height:940,minWidth:1040,minHeight:700,title:'NexSearch 1.6.6',backgroundColor:'#f5f6fa',autoHideMenuBar:true,show:!process.argv.includes('--hidden'),icon:path.join(__dirname,'logo.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true}});
  guard(win.webContents,true);win.on('close',event=>{if(!exiting){event.preventDefault();quit();}});
  for(const [name,fn] of Object.entries({'notification:show':notify,'notification:clear':clearNotifications,'service:show':show,'service:hide':hide,'service:bounds':v=>active?.setBounds(bounds(v)),'service:back':()=>{if(active?.webContents.navigationHistory.canGoBack())active.webContents.navigationHistory.goBack();},'service:reload':()=>active?.webContents.reload(),'update:prepare':async()=>{
   if(process.platform!=='win32'||!program||!home)throw Error('Используйте комплект и инструкцию обновления для этой платформы');

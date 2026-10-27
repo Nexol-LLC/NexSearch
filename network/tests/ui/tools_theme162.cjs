@@ -27,7 +27,7 @@ let app;
  });
  for(const theme of ['dark','light']){
   await page.evaluate(theme=>applyAppearance162({theme,density:'comfortable',motion:false},true),theme);
-  for(const [view,services] of Object.entries({maps:['yandex','2gis','cargo','scales'],rates:['calculator','signl'],tools:['clock','tracking','optimus']})){
+  for(const [view,services] of Object.entries({maps:['yandex','2gis','cargo','scales'],rates:['calculator','signl'],tools:['clock','tracking','pdf','optimus']})){
    console.log('Checking',theme,view);await page.click(`[data-view="${view}"]`);
    await page.waitForSelector('#service-switcher button');
    assert.equal(await page.locator('#service-switcher').evaluate(el=>getComputedStyle(el).backgroundColor),theme==='dark'?'rgb(25, 33, 48)':'rgb(255, 255, 255)');
@@ -59,6 +59,6 @@ let app;
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await page.screenshot({path:path.join(out,'maps-dark-1100.png'),animations:'disabled'});
  assert.deepEqual(errors,[]);
- await fs.writeFile(path.join(out,'result.json'),JSON.stringify({passed:true,themes:2,services:9,minimumContrast:4.5,bounds},null,2));
+ await fs.writeFile(path.join(out,'result.json'),JSON.stringify({passed:true,themes:2,services:10,minimumContrast:4.5,bounds},null,2));
  console.log('Maps, rates and tools: both palettes, all 9 services, active/hover text contrast >=4.5, toolbar, fallback, native view bounds and 1100px layout passed.');
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.removeAllListeners('close')));await app.close()}});

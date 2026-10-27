@@ -94,20 +94,22 @@ editCompany=company=>{
   operations.style.top=$('#editor .dialog-head').getBoundingClientRect().height+'px';
   if(!$('#lead-task15')&&user.role!=='logist'&&company.employee_id){const task=document.createElement('button');task.type='button';task.id='lead-task15';task.textContent='+ Задача';task.onclick=()=>editTask14({company_id:company.id,employee_id:company.employee_id,title:'Связаться: '+company.name});operations.append(task)}
  }
- let group='overview';
+ let group='overview';const sections={};
+ for(const [key,title] of [['overview','Сведения о компании'],['contacts','Контакты'],['work','Работа с компанией'],['finance','Финансовые сведения']]){const section=document.createElement('section');section.className='company-section165';section.dataset.companySection165=key;section.innerHTML=`<h3>${title}</h3>`;sections[key]=section}
  for(const node of [...body.children]){
   if(node===operations)continue;
   if(node.tagName==='H3'&&node.textContent.startsWith('Финансовые'))group='finance';
   if(node.tagName==='H3'&&node.textContent==='Работа с компанией')group='work';
   if(node.classList.contains('detail')&&['Этап','Описание звонка','Маршрут'].includes(node.firstElementChild?.textContent))group='work';
-  node.dataset.companyTab16=node.classList.contains('working-contacts151')?'contacts':group;
+  if(node.tagName==='H3'){node.remove();continue}
+  const label=node.classList.contains('detail')?node.firstElementChild?.textContent:'';
+  const section=node.classList.contains('working-contacts151')||['Телефоны','Почта'].includes(label)?'contacts':group;
+  sections[section].append(node);
  }
  const header=document.createElement('div');header.className='company-summary16';header.innerHTML=`<div><span class="eyebrow">${esc(company.region||'Регион не указан')}</span>${clockHtml16(company)}</div><div>${badge(company.lead_status)}${company.stage?` <span class="stage-pill">${esc(company.stage)}</span>`:''}</div>`;
- const tabs=document.createElement('div');tabs.className='company-tabs16';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Разделы карточки');tabs.innerHTML=[['overview','Сведения'],['work','Работа'],['contacts','Контакты'],['finance','Финансы'],['mail','Письма']].map(([key,label])=>`<button type="button" role="tab" data-company-tab="${key}">${label}</button>`).join('');
- if(operations)operations.after(header,tabs);else body.prepend(header,tabs);
- const mail=document.createElement('section');mail.id='company-mail16';mail.dataset.companyTab16='mail';mail.innerHTML='<p class="muted">Загружаем переписку…</p>';body.append(mail);
- const switchTab=key=>{$$('[data-company-tab16]').forEach(node=>node.hidden=node.dataset.companyTab16!==key);tabs.querySelectorAll('button').forEach(button=>{const active=button.dataset.companyTab===key;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active))});if(key==='mail')loadCompanyMail16(company,mail);$('#editor').scrollTop=0};
- tabs.querySelectorAll('button').forEach(button=>button.onclick=()=>switchTab(button.dataset.companyTab));switchTab('overview');
+ if(operations)operations.after(header);else body.prepend(header);
+ for(const [key,section] of Object.entries(sections))if(key==='contacts'||section.children.length>1)body.append(section);
+ const mail=document.createElement('section');mail.id='company-mail16';mail.className='company-section165';mail.innerHTML='<h3>Переписка</h3><p class="muted">Загружаем переписку…</p>';body.append(mail);loadCompanyMail16(company,mail);
  if($('#lead-task15'))$('#lead-task15').onclick=()=>editTask14({company_id:company.id,employee_id:company.employee_id||user.id,title:'Связаться: '+company.name,description:company.call_note||''});
  const emailRow=[...body.querySelectorAll('.detail')].find(n=>n.firstElementChild?.textContent==='Почта');
  if(emailRow&&company.emails?.length){const write=document.createElement('button');write.type='button';write.className='mail-write-company16';write.textContent='Написать';write.onclick=()=>composeMail16({to:company.emails});emailRow.lastElementChild.append(write)}

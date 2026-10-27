@@ -20,6 +20,13 @@ def build(kind):
  command.append(str(ROOT/entry));subprocess.run(command,cwd=ROOT,check=True)
  if kind!='Maintenance':
   shutil.copy2(ROOT/'network/client-trust.json',out/'client-trust.json');shutil.copy2(ROOT/'updates-public.pem',out/'updates-public.pem')
+  public_profile=ROOT/'deployment/internet-access.json'
+  if public_profile.is_file():
+   import json
+   from network.internet_access import validate_profile
+   configured=validate_profile(json.loads(public_profile.read_text(encoding='utf-8')),json.loads((ROOT/'network/client-trust.json').read_text(encoding='utf-8')))
+   (out/'internet-access.json').write_text(json.dumps(configured,sort_keys=True),encoding='utf-8')
+  else:(out/'internet-access.json').unlink(missing_ok=True)
   shutil.copytree(ROOT/'desktop/app',out/'desktop/app',dirs_exist_ok=True)
   notices=out/'licenses';notices.mkdir(exist_ok=True)
   for source,name3 in [(ROOT/'vpn/TAILSCALE-LICENSE.txt','TAILSCALE-LICENSE.txt'),(ROOT/'network/bin/windows-amd64/THIRD-PARTY-NOTICES.txt','VPN-THIRD-PARTY-NOTICES.txt')]:

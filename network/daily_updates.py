@@ -69,12 +69,16 @@ def _check_update(program,home,trust,agent=None,force=False):
   session=agent.session
  else:
   profile=secure_store.read(home/'employee.sec',{});url=profile.get('host_url');token=profile.get('token');session=requests.Session();session.trust_env=False;session.mount('https://',PinnedAdapter(trust['fingerprint']))
+  from .internet_access import load_profile,offline_candidates,healthy
+  internet,_=load_profile(program,trust)
+  if internet or profile.get('connection_preference')=='internet':
+   url=next((candidate for candidate in offline_candidates(profile,internet) if healthy(session,candidate,trust['host_id'])),None)
  if not token or not url:
   state.update(phase='waiting',message='Для проверки обновления требуется подключение к хосту и вход');write_state(home,state);return state
  state.pop('last_error',None)
  state.update(checked_at=now.isoformat(),phase='checking',message='Проверяем пакет сотрудника на хосте',branch='employe',retry_at=(now+timedelta(minutes=5)).isoformat());write_state(home,state)
  try:
-  headers={'Authorization':'Bearer '+token};response=session.get(url+'/api/update/info',params={'platform':role()},headers=headers,timeout=30);response.raise_for_status();info=response.json()
+  headers={'Authorization':'Bearer '+token};response=session.get(url+'/api/update/info',params={'platform':role()},headers=headers,timeout=30,allow_redirects=False);response.raise_for_status();info=response.json()
   state['host_checked_at']=info.get('checked_at')
   # At 10:00 the client can reach the host before its GitHub check finishes.
   # A stale cache must not suppress every further attempt for the whole day.

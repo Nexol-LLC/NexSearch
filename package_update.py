@@ -23,6 +23,13 @@ def package(role,output,key,commit,trust_file=None):
   files['client-trust.json']=(ROOT/'network/client-trust.json').read_bytes()
  else:raise ValueError(role)
  metadata={'version':version,'source_commit':commit,'role':role,'schema':version_info['schema'],'built_at':int(time.time())}
+ public_profile=ROOT/'deployment/internet-access.json'
+ if public_profile.is_file():
+  from network.internet_access import validate_profile
+  trust=json.loads((ROOT/'network/client-trust.json').read_text(encoding='utf-8'))
+  configured=validate_profile(json.loads(public_profile.read_text(encoding='utf-8')),trust)
+  files['internet-access.json']=json.dumps(configured,sort_keys=True).encode()
+  if role in ('HostUbuntu','EmployeeMac'):files['network/internet-access.json']=files['internet-access.json']
  if trust_file is not None:
   if role not in ('EmployeeWindows','EmployeeMac'):raise ValueError('A host override is only valid for employee packages')
   trust=json.loads(Path(trust_file).read_text(encoding='utf-8'))
@@ -33,6 +40,8 @@ def package(role,output,key,commit,trust_file=None):
   files['client-trust.json']=raw_trust
   if role=='EmployeeMac':files['network/client-trust.json']=raw_trust
   metadata['host_id']=trust['host_id']
+  if 'internet-access.json' in files and json.loads(files['internet-access.json'])['host_id']!=trust['host_id']:
+   files.pop('internet-access.json',None);files.pop('network/internet-access.json',None)
  files['package-info.json']=json.dumps(metadata,indent=2).encode()
  manifest={**metadata,'files':{role+'/'+name:hashlib.sha256(data).hexdigest() for name,data in sorted(files.items())}}
  raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
