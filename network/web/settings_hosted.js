@@ -17,7 +17,7 @@ async function openHostSettings(){
  selectSettingsTab('host');
 }
 async function loadHostSettings(){const epoch=settingsEpoch;if(!settingsVisible('host',epoch))return;try{const [host,connection]=await Promise.all([api('/api/host/status'),fetch('/api/connection').then(r=>r.json())]);if(!settingsVisible('host',epoch))return;const address=connection.host_url||connection.host||host.ip;$('#host-settings-content').innerHTML=`<div class="panel"><span class="badge taken">Хост доступен</span><h3>${esc(host.hostname)}</h3>${detail('IP / адрес',address)}${detail('Версия',host.version)}${detail('CPU',host.cpu_percent.toFixed(1)+'%')}${detail('Оперативная память',(host.memory_used_bytes/1024**3).toFixed(1)+' / '+(host.memory_total_bytes/1024**3).toFixed(1)+' ГБ · '+host.memory_percent+'%')}${detail('Свободно на диске',(host.disk_free_bytes/1024**3).toFixed(1)+' ГБ')}${detail('Поиск',host.queue.running+' задач выполняется · '+host.queue.queued+' в очереди')}${detail('Проверка обновлений','Ежедневно в 10:00 МСК')}${detail('Последняя проверка',host.updates.checked_at?dateFull(host.updates.checked_at):'Ещё не выполнялась')}</div>`}catch(e){if(!settingsVisible('host',epoch))return;$('#host-settings-content').innerHTML='<span class="badge refused">Хост недоступен</span><p>'+esc(e.message)+'</p>'}}
-let updateRequestBusy=false;
+let updateRequestBusy=false,updateRestartIntent=null;
 async function loadLocalUpdates(){
  const epoch=settingsEpoch;
  if(!settingsVisible('updates',epoch))return;
@@ -28,15 +28,29 @@ async function loadLocalUpdates(){
   }
   const state=await api('/api/client/update/status');if(!settingsVisible('updates',epoch))return;
   const ready=state.phase==='ready'||(state.pending_state&&state.phase!=='error');
-  const message=ready?'Обновление готово. Полностью закройте программу и откройте её после установки.':state.message||'Проверка ещё не выполнялась';
+  const message=ready?(state.supports_restart?'Обновление готово. Нажмите «Установить и перезапустить».':'Обновление готово. Полностью закройте программу и откройте её после установки.'):state.message||'Проверка ещё не выполнялась';
   const progress=state.phase==='downloading'&&state.total_bytes?detail('Скачано',(state.downloaded_bytes/1024**2).toFixed(1)+' / '+(state.total_bytes/1024**2).toFixed(1)+' МБ'):'';
   $('#update-details').innerHTML=`<p>Пакет сотрудника: ветка employe, через хост. Проверка ежедневно в 10:00 МСК.</p>${detail('Установлена у сотрудника',state.installed_version||document.querySelector('.brand small')?.textContent||'—')}${detail('Пакет на хосте',state.version||'—')}${detail('Состояние',message)}${progress}${detail('Проверка сотрудника',state.checked_at?dateFull(state.checked_at):'—')}${detail('Проверка GitHub хостом',state.host_checked_at?dateFull(state.host_checked_at):'—')}${state.last_error?detail('Код ошибки',state.last_error):''}`;
   const button=$('#check-update-now');button.disabled=updateRequestBusy||!!state.checking;
+  button.textContent=state.supports_restart?(ready?'Установить и перезапустить':'Обновить и перезапустить'):'Проверить сейчас';
+  if(updateRestartIntent&&state.supports_restart&&ready&&!state.checking&&!updateRequestBusy){
+   updateRequestBusy=true;button.disabled=true;updateRestartIntent=null;
+   $('#update-request-message').textContent='Устанавливаем обновление. Программа откроется автоматически…';
+   try{
+    await api('/api/client/update/install',{method:'POST',body:'{}'});
+    if(window.NexDesktop?.quit)await window.NexDesktop.quit();
+    else{await api('/api/client/exit',{method:'POST',body:'{}'});$('#update-request-message').textContent='Обновление устанавливается. Программа откроется автоматически.'}
+   }catch(e){updateRequestBusy=false;if(settingsVisible('updates',epoch))$('#update-request-message').textContent=e.message}
+   return;
+  }
+  if(updateRestartIntent&&!state.checking&&(['error','waiting'].includes(state.phase)||state.phase==='current'&&state.checked_at!==updateRestartIntent.checked_at))updateRestartIntent=null;
   button.onclick=async()=>{
+   if(state.supports_restart&&ready){updateRestartIntent={checked_at:state.checked_at};return loadLocalUpdates()}
    updateRequestBusy=true;button.disabled=true;$('#update-request-message').textContent='Запускаем проверку…';
    try{
     const result=await api('/api/client/update/check',{method:'POST',body:'{}'});
-    if(settingsVisible('updates',epoch))$('#update-request-message').textContent=result.queued?'Проверка запущена. Состояние обновляется автоматически.':'Обновлятель сотрудника недоступен в этом режиме. Откройте программу сотрудника.';
+    if(result.queued&&state.supports_restart)updateRestartIntent={checked_at:state.checked_at};
+    if(settingsVisible('updates',epoch))$('#update-request-message').textContent=result.queued?(state.supports_restart?'Скачиваем и проверяем обновление. После установки программа откроется автоматически.':'Проверка запущена. Состояние обновляется автоматически.'):'Обновлятель сотрудника недоступен в этом режиме. Откройте программу сотрудника.';
    }catch(e){if(settingsVisible('updates',epoch))$('#update-request-message').textContent=e.message}
    finally{updateRequestBusy=false;if(settingsVisible('updates',epoch))loadLocalUpdates()}
   };

@@ -144,6 +144,59 @@ class DailyUpdater:
  def run(self):
   while not self.closed.wait(30):self.check()
  def close(self):self.closed.set();self.thread.join(timeout=5)
+
+def request_restart(program,home):
+ """Arm a restart only for the verified pending commit explicitly chosen by the employee."""
+ from cryptography.hazmat.primitives.serialization import load_pem_public_key
+ from cryptography.exceptions import InvalidSignature
+ state=read_state(home);pending=state.get('pending_state')
+ if state.get('phase')!='ready' or not pending:raise ValueError('Сначала дождитесь подготовки обновления')
+ prepared=json.loads(Path(pending).read_text(encoding='utf-8'))
+ if Path(prepared['program']).resolve()!=Path(program).resolve() or prepared['role']!=role():raise ValueError('Пакет относится к другой программе')
+ stage=Path(prepared['stage']);raw=(stage/'release.json').read_bytes()
+ try:load_pem_public_key((Path(program)/'updates-public.pem').read_bytes()).verify((stage/'release.sig').read_bytes(),raw)
+ except (InvalidSignature,ValueError):raise ValueError('Подпись обновления не подтверждена') from None
+ candidate=json.loads(raw)
+ installed=json.loads((Path(program)/'package-info.json').read_text(encoding='utf-8'))
+ if candidate['role']!=role() or candidate['source_commit']!=state.get('pending_commit') or older_package(installed,candidate) or installed.get('source_commit')==candidate['source_commit']:raise ValueError('Подготовленный пакет устарел. Повторите проверку')
+ if sys.platform=='win32' and not (Path(program)/'NexSearch Maintenance.exe').is_file():raise ValueError('Не найден модуль установки')
+ state.update(restart_commit=candidate['source_commit'],message='Обновление устанавливается; программа откроется автоматически')
+ write_state(home,state)
+ return {'restart_scheduled':True}
+
+def wait_for_process(pid,timeout=120):
+ if not pid:return
+ if sys.platform=='win32':
+  import ctypes
+  from ctypes import wintypes
+  api=ctypes.WinDLL('kernel32',use_last_error=True)
+  api.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];api.OpenProcess.restype=wintypes.HANDLE
+  api.WaitForSingleObject.argtypes=[wintypes.HANDLE,wintypes.DWORD];api.WaitForSingleObject.restype=wintypes.DWORD
+  api.CloseHandle.argtypes=[wintypes.HANDLE]
+  handle=api.OpenProcess(0x00100000,False,pid)
+  if not handle:
+   if ctypes.get_last_error()==87:return
+   raise OSError('Не удалось дождаться завершения программы')
+  try:
+   if api.WaitForSingleObject(handle,int(timeout*1000))!=0:raise RuntimeError('Программа ещё завершает работу')
+  finally:api.CloseHandle(handle)
+ else:
+  deadline=time.monotonic()+timeout
+  while time.monotonic()<deadline:
+   try:os.kill(pid,0)
+   except ProcessLookupError:return
+   time.sleep(.1)
+  raise RuntimeError('Программа ещё завершает работу')
+
+def restart_employee(state_file,home):
+ prepared=json.loads(Path(state_file).read_text(encoding='utf-8'));program=Path(prepared['program']).resolve()
+ if prepared['role']!=role():raise ValueError('Перезапуск разрешён только программе сотрудника')
+ env=os.environ.copy();env.pop('NEXOL_NO_BROWSER',None);env['NEXOL_HOME']=str(home)
+ if sys.platform=='win32':
+  subprocess.Popen([str(program/'NexSearch.exe')],cwd=program,env=env,creationflags=subprocess.CREATE_NO_WINDOW)
+ elif sys.platform=='darwin':
+  subprocess.Popen([sys.executable,str(program/'network/mac_entry.py'),'employee'],cwd=program,env=env,start_new_session=True)
+ else:raise ValueError('Неизвестная платформа сотрудника')
 def install_schedule(program,home,trust):
  if os.environ.get('NEXSEARCH_NO_INSTALL') or not getattr(sys,'frozen',False) and sys.platform!='darwin':return
  program=Path(program);home=Path(home);folder=home/'updates';folder.mkdir(parents=True,exist_ok=True)
@@ -177,14 +230,19 @@ def apply_pending_on_exit(program,home):
  program=Path(program);home=Path(home);folder=home/'updates';runner=folder/('runner-'+str(int(time.time()))+'.exe')
  if sys.platform=='win32':
   shutil.copy2(program/'NexSearch Maintenance.exe',runner)
-  subprocess.Popen([str(runner),'apply','--state',pending,'--home',str(home)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW|subprocess.DETACHED_PROCESS)
+  args=[str(runner),'apply','--state',pending,'--home',str(home),'--wait-pid',str(os.getpid())]
+  if state.get('restart_commit')==candidate.get('source_commit'):args.append('--restart')
+  subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW|subprocess.DETACHED_PROCESS)
  elif sys.platform=='darwin':
-  subprocess.Popen([sys.executable,'-m','network.daily_updates','--apply',pending,'--home',str(home),'--wait-pid',str(os.getpid())],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+  args=[sys.executable,'-m','network.daily_updates','--apply',pending,'--home',str(home),'--wait-pid',str(os.getpid())]
+  if state.get('restart_commit')==candidate.get('source_commit'):args.append('--restart')
+  subprocess.Popen(args,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 def record_applied(home,state_file):
  # Read the package actually applied, rather than a mutable newer pending value.
  prepared=json.loads(Path(state_file).read_text(encoding='utf-8'))
  manifest=json.loads((Path(prepared['stage'])/'release.json').read_text(encoding='utf-8'))
  state=read_state(home);state['installed_commit']=manifest.get('source_commit')
+ if state.get('restart_commit')==manifest.get('source_commit'):state.pop('restart_commit',None)
  pending_is_older=False
  if state.get('pending_state') and state.get('pending_state')!=str(state_file):
   try:
@@ -196,20 +254,26 @@ def record_applied(home,state_file):
  write_state(home,state)
 
 def record_apply_error(home,error):
- state=read_state(home);state.update(phase='error',last_error=type(error).__name__,message='Установка не завершена. Полностью закройте программу и повторите установку');write_state(home,state)
+ state=read_state(home);state.pop('restart_commit',None);state.update(phase='error',last_error=type(error).__name__,message='Установка не завершена. Сохранена предыдущая версия; повторите обновление');write_state(home,state)
+
+def record_restart_error(home,error):
+ state=read_state(home);state.update(phase='installed',last_error=type(error).__name__,message='Обновление установлено. Откройте программу: автоматический запуск не удался');write_state(home,state)
 def main():
  import argparse
- parser=argparse.ArgumentParser();parser.add_argument('--program');parser.add_argument('--home',required=True);parser.add_argument('--apply');parser.add_argument('--wait-pid',type=int);args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--program');parser.add_argument('--home',required=True);parser.add_argument('--apply');parser.add_argument('--wait-pid',type=int);parser.add_argument('--restart',action='store_true');args=parser.parse_args()
  if args.apply:
-  if args.wait_pid:
-   for _ in range(120):
-    try:os.kill(args.wait_pid,0)
-    except OSError:break
-    time.sleep(1)
-   else:raise RuntimeError('Employee process is still active')
   from .updates import apply
-  try:apply(args.apply);record_applied(args.home,args.apply)
-  except Exception as error:record_apply_error(args.home,error);raise
+  try:
+   wait_for_process(args.wait_pid);apply(args.apply);record_applied(args.home,args.apply)
+   if args.restart:
+    try:restart_employee(args.apply,args.home)
+    except Exception as error:record_restart_error(args.home,error)
+  except Exception as error:
+   record_apply_error(args.home,error)
+   if args.restart:
+    try:restart_employee(args.apply,args.home)
+    except Exception:pass
+   raise
  else:
   trust=json.loads((Path(args.program)/'client-trust.json').read_text(encoding='utf-8'));check_update(args.program,args.home,trust)
 if __name__=='__main__':main()

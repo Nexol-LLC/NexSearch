@@ -48,7 +48,7 @@ def main():
         host=subprocess.Popen([str(ROOT/'dist/HostWindows/NexSearch.exe')],env=env,cwd=ROOT/'dist/HostWindows',creationflags=subprocess.CREATE_NO_WINDOW)
         wait('http://127.0.0.1:9058/api/connection',host)
         status=requests.get('http://127.0.0.1:9058/api/host/status',timeout=5);assert status.status_code==200,status.text
-        assert status.json()['version']=='1.6.6'
+        assert status.json()['version']=='1.6.7'
         trust=json.loads((host_home/'identity/host-identity.json').read_text())
         session=requests.Session();session.trust_env=False;session.mount('https://',PinnedAdapter(trust['fingerprint']))
         secret=secure_store.read(host_home/'admin.sec')
@@ -72,7 +72,7 @@ def main():
         employee=subprocess.Popen([str(ROOT/'dist/EmployeeWindows/NexSearch.exe')],env=employee_env,cwd=ROOT/'dist/EmployeeWindows',creationflags=subprocess.CREATE_NO_WINDOW)
         wait('http://127.0.0.1:9060/api/connection',employee)
         ui='http://127.0.0.1:9060'
-        index=requests.get(ui,timeout=5).text;assert '1.6.6' in index and 'workspace16.js' in index and 'mail_workspace16.js' in index and 'appearance.js' in index and 'customer_workspace.js' in index
+        index=requests.get(ui,timeout=5).text;assert '1.6.7' in index and 'workspace16.js' in index and 'mail_workspace16.js' in index and 'appearance.js' in index and 'customer_workspace.js' in index
         data=requests.get(ui+'/api/leads',timeout=5).json()['companies'];assert data[0]['company_time']['utc_offset']==4
         assert requests.get(ui+'/api/mail/accounts',timeout=5).json()['accounts']==[]
         card=requests.get(ui+'/api/companies/'+str(company),timeout=5);assert card.status_code==200 and card.json()['inn']==item['inn']
@@ -105,7 +105,7 @@ def main():
         assert requests.post(ui+'/api/notifications/clear',headers=headers,json={},timeout=5).status_code==200
         assert requests.get(ui+'/api/notifications',timeout=5).json()['unread']==0
         print('Compiled HostWindows and EmployeeWindows: startup, PostgreSQL migration, timezone assets, mail routes, tasks, notifications passed (VPN onboarding is opt-in).',flush=True)
-        (base/'result.json').write_text(json.dumps({'version':'1.6.6','compiled_host':True,'compiled_employee':True,'schema':19,'passed':True,'test_home':str(home)}),encoding='utf-8')
+        (base/'result.json').write_text(json.dumps({'version':'1.6.7','compiled_host':True,'compiled_employee':True,'schema':19,'passed':True,'test_home':str(home)}),encoding='utf-8')
     finally:
         try:stop('http://127.0.0.1:9060',employee)
         finally:
