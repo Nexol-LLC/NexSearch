@@ -32,7 +32,8 @@ jobs:
         run: |
           if [ "${GITHUB_REF_NAME}" = host ]; then
             python package_update.py HostUbuntu --output .updates/host-linux.zip --commit "$GITHUB_SHA"
-            echo 'path=.updates/host-linux.zip' >> "$GITHUB_OUTPUT"
+            python ubuntu/tunnel/release.py --output .updates/host-office-connect.zip --commit "$GITHUB_SHA"
+            echo 'path=.updates/host-*.zip' >> "$GITHUB_OUTPUT"
           else
             python package_update.py EmployeeMac --output .updates/employee-mac.zip --commit "$GITHUB_SHA"
             python package_update.py EmployeeMac --output .updates/employee-mac-local.zip --commit "$GITHUB_SHA" --trust deployment/local-client-trust.json
