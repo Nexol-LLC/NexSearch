@@ -8,6 +8,7 @@ from .api13 import Input
 from .database import NotFound,Conflict
 from .presentation import summary
 from .notifications import notify
+from fastapi.responses import Response
 
 class Transfer(Input):
     employee_id:UUID
@@ -28,6 +29,44 @@ def install(app,db,employee):
 
     def may_manage(user,person):
         return user['role']=='director' or user['role']=='manager' and (str(person['id'])==str(user['id']) or person['role']=='logist' and person['department']==user['department'])
+
+    @app.get('/api/clients/overview')
+    def client_overview(employee_id:UUID|None=None,order:str='recent',user=Depends(employee)):
+        if user['role'] not in ('manager','director'):raise HTTPException(403,'Общий канбан доступен руководителю отдела и генеральному директору')
+        sorting={'recent':'cl.created_at DESC,co.id','stage':'lower(cl.stage),co.name,co.id','name':'co.name,co.id'}
+        if order not in sorting:raise ValueError('Неизвестная сортировка')
+        # Keep the normal actor context: PostgreSQL RLS restricts managers to
+        # themselves and their department's logisticians, directors see everyone.
+        with db.transaction(user['id']) as c:
+            if employee_id:
+                person=c.execute('SELECT id,role,department FROM employees WHERE id=%s',(employee_id,)).fetchone()
+                if not person or not may_manage(user,person):raise NotFound('Сотрудник недоступен')
+            rows=c.execute(f'''SELECT co.id,co.payload,l.employee_id,l.status AS lead_status,l.called,l.call_note,l.called_at,l.revision,
+              cl.stage,cl.revision AS stage_revision,cl.origin,cl.destination,cl.cargo,cl.weight_kg,
+              e.first_name AS owner_first_name,e.last_name AS owner_last_name
+              FROM employee_clients cl JOIN employee_leads l ON l.company_id=cl.company_id AND l.employee_id=cl.employee_id
+              JOIN companies co ON co.id=cl.company_id JOIN employees e ON e.id=cl.employee_id
+              WHERE cl.active AND (%s::uuid IS NULL OR cl.employee_id=%s) ORDER BY {sorting[order]}''',(employee_id,employee_id)).fetchall()
+            owners=c.execute('''SELECT e.id,e.first_name,e.last_name,count(*) AS client_count
+              FROM employee_clients cl JOIN employees e ON e.id=cl.employee_id
+              WHERE cl.active GROUP BY e.id,e.first_name,e.last_name ORDER BY lower(e.last_name),lower(e.first_name),e.id''').fetchall()
+            saved=[r['name'] for r in c.execute('SELECT name FROM workspace_stages WHERE employee_id=%s ORDER BY position',(employee_id,))] if employee_id else []
+        companies=[{**summary(r.pop('payload')),**r} for r in rows]
+        stages=list(dict.fromkeys(saved+sorted({r['stage'] or 'В работе' for r in companies},key=str.casefold))) or ['В работе']
+        return {'companies':companies,'stages':stages,'owners':owners}
+
+    @app.get('/api/clients/overview/export')
+    def export_overview(employee_id:UUID|None=None,order:str='recent',user=Depends(employee)):
+        import io,xlsxwriter
+        data=client_overview(employee_id,order,user);stream=io.BytesIO()
+        with xlsxwriter.Workbook(stream,{'in_memory':True,'strings_to_formulas':False,'strings_to_urls':False}) as book:
+            sheet=book.add_worksheet('Клиенты');columns=['Компания','ИНН','Ответственный','Этап','Регион','Телефоны','Почта','Откуда','Куда','Описание звонка']
+            header=book.add_format({'bold':True,'bg_color':'#37316b','font_color':'white'})
+            sheet.write_row(0,0,columns,header);sheet.freeze_panes(1,1);sheet.set_column(0,len(columns)-1,28)
+            for row,c in enumerate(data['companies'],1):
+                sheet.write_row(row,0,[c.get('name',''),c.get('inn',''),c['owner_first_name']+' '+c['owner_last_name'],c['stage'],c.get('region',''),'\n'.join(c.get('phones') or []),'\n'.join(c.get('emails') or []),c.get('origin',''),c.get('destination',''),c.get('call_note','')])
+            sheet.autofilter(0,0,len(data['companies']),len(columns)-1)
+        return Response(stream.getvalue(),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename=NexSearch-clients-overview.xlsx'})
 
     @app.get('/api/companies/{ident}')
     def get_company(ident:UUID,user=Depends(employee)):return company(user,ident)
