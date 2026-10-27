@@ -44,7 +44,37 @@ const root=path.resolve(__dirname,'../../..');
   });
   await page.click('#settings-host-tab');await page.click('#settings-update-tab');await page.evaluate(()=>resolveHost());
   await page.waitForFunction(()=>document.querySelector('#update-details')?.textContent.includes('PermissionError'));
+  // A background download never restarts; only the explicit one-click action does.
+  await page.evaluate(()=>{
+   window.quitCalls=0;window.installCalls=0;window.NexDesktop={quit:async()=>{quitCalls++}};
+   const oldApi=api;window.api=async(url)=>{
+    if(url.endsWith('/install')){installCalls++;return {restart_scheduled:true}}
+    if(url.endsWith('/check')){
+     testState={installed_version:'1.6.6',version:'1.6.7',supports_restart:true,phase:'checking',checking:true,checked_at:'new'};
+     setTimeout(()=>{testState={...testState,phase:'ready',checking:false,pending_state:'stage'}},500);
+     return {queued:true};
+    }
+    return oldApi(url);
+   };
+   testState={installed_version:'1.6.6',version:'1.6.7',supports_restart:true,phase:'ready',pending_state:'stage',checking:false};
+  });
+  await page.waitForFunction(()=>document.querySelector('#check-update-now').textContent==='Установить и перезапустить');
+  assert.equal(await page.evaluate(()=>quitCalls),0);
+  await page.evaluate(()=>testState={installed_version:'1.6.6',version:'1.6.7',supports_restart:true,phase:'current',checking:false,checked_at:'old'});
+  await page.waitForFunction(()=>document.querySelector('#check-update-now').textContent==='Обновить и перезапустить');
+  await page.click('#check-update-now');
+  await page.waitForFunction(()=>quitCalls===1);
+  assert.equal(await page.evaluate(()=>installCalls),1);
+  // A signature/install failure keeps the running application open.
+  await page.evaluate(()=>{
+   updateRequestBusy=false;updateRestartIntent=null;quitCalls=0;
+   const oldApi=api;window.api=async url=>{if(url.endsWith('/install'))throw Error('Подпись обновления не подтверждена');return oldApi(url)};
+  });
+  await page.waitForFunction(()=>!document.querySelector('#check-update-now').disabled);
+  await page.click('#check-update-now');
+  await page.waitForFunction(()=>document.querySelector('#update-request-message').textContent.includes('Подпись'));
+  assert.equal(await page.evaluate(()=>quitCalls),0);
   assert.deepEqual(errors,[]);
-  console.log('Automatic polling, separate versions, queued=false, install errors and tab request isolation passed.');
+  console.log('Polling, old-client fallback, explicit one-click restart, background non-restart, signature failure and tab isolation passed.');
  }finally{await app.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

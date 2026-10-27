@@ -2,7 +2,7 @@ import argparse,json,sys
 sys.stdout.reconfigure(encoding='utf-8')
 from network.updates import prepare,apply,rollback
 def main():
- p=argparse.ArgumentParser();p.add_argument('action',choices=['prepare','apply','rollback','check-daily']);p.add_argument('--archive');p.add_argument('--program');p.add_argument('--home');p.add_argument('--role');p.add_argument('--state');p.add_argument('--folder');args=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('action',choices=['prepare','apply','rollback','check-daily']);p.add_argument('--archive');p.add_argument('--program');p.add_argument('--home');p.add_argument('--role');p.add_argument('--state');p.add_argument('--folder');p.add_argument('--wait-pid',type=int);p.add_argument('--restart',action='store_true');args=p.parse_args()
  try:
   if args.action=='check-daily':
    import os
@@ -16,14 +16,26 @@ def main():
    if instance.acquire():instance.close();apply_pending_on_exit(args.program,args.home)
    else:instance.close()
   else:
+   if args.action=='apply':
+    from network.daily_updates import wait_for_process
+    wait_for_process(args.wait_pid)
    result=prepare(args.archive,args.program,args.home,args.role) if args.action=='prepare' else apply(args.state) if args.action=='apply' else rollback(args.folder)
    if args.action=='apply' and args.home:
     from network.daily_updates import record_applied
     record_applied(args.home,args.state)
+   if args.action=='apply' and args.restart:
+    from network.daily_updates import restart_employee,record_restart_error
+    try:restart_employee(args.state,args.home)
+    except Exception as error:record_restart_error(args.home,error)
   print(json.dumps(result,ensure_ascii=False),flush=True)
  except Exception as e:
   if args.action=='apply' and args.home:
    from network.daily_updates import record_apply_error
    record_apply_error(args.home,e)
+   if args.restart:
+    try:
+     from network.daily_updates import restart_employee
+     restart_employee(args.state,args.home)
+    except Exception:pass
   print(json.dumps({'error':str(e)},ensure_ascii=False),flush=True);raise SystemExit(1)
 if __name__=='__main__':main()

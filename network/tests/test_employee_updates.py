@@ -139,3 +139,62 @@ def test_exit_does_not_apply_legacy_pending_after_newer_manual_install(setup,mon
     monkeypatch.setattr(updater.subprocess,'Popen',lambda *a,**k:pytest.fail('Old pending package launched'))
     updater.apply_pending_on_exit(s.program,s.home)
     assert 'pending_state' not in updater.read_state(s.home)
+
+
+def test_explicit_restart_binds_verified_commit_and_is_not_background_default(setup,monkeypatch):
+    s=setup;state=check(s);(s.program/'NexSearch Maintenance.exe').write_bytes(b'fixture helper')
+    monkeypatch.delenv('NEXSEARCH_NO_INSTALL',raising=False)
+    calls=[];monkeypatch.setattr(updater.subprocess,'Popen',lambda *a,**kw:calls.append((a,kw)))
+    updater.apply_pending_on_exit(s.program,s.home)
+    assert '--restart' not in calls[-1][0][0]
+    assert updater.request_restart(s.program,s.home)=={'restart_scheduled':True}
+    updater.apply_pending_on_exit(s.program,s.home)
+    assert '--restart' in calls[-1][0][0] and '--wait-pid' in calls[-1][0][0]
+    assert updater.read_state(s.home)['restart_commit']=='new'
+    updater.record_apply_error(s.home,PermissionError())
+    assert 'restart_commit' not in updater.read_state(s.home)
+
+
+def test_restart_rejects_modified_signature_and_newer_installed_copy(setup):
+    s=setup;state=check(s);(s.program/'NexSearch Maintenance.exe').write_bytes(b'fixture')
+    pending=json.loads(Path(state['pending_state']).read_text())
+    signature=Path(pending['stage'])/'release.sig';original=signature.read_bytes();signature.write_bytes(b'bad')
+    with pytest.raises(ValueError):updater.request_restart(s.program,s.home)
+    assert 'restart_commit' not in updater.read_state(s.home)
+    signature.write_bytes(original)
+    (s.program/'package-info.json').write_text(json.dumps({'version':'2.0.0','source_commit':'future'}))
+    with pytest.raises(ValueError):updater.request_restart(s.program,s.home)
+
+
+def test_restart_uses_fixed_employee_entry_and_same_home(setup,monkeypatch):
+    s=setup;state=check(s);calls=[]
+    monkeypatch.setenv('NEXOL_NO_BROWSER','1')
+    monkeypatch.setattr(updater.subprocess,'Popen',lambda *a,**kw:calls.append((a,kw)))
+    updater.restart_employee(state['pending_state'],s.home)
+    assert calls[0][0][0]==[str(s.program.resolve()/'NexSearch.exe')]
+    assert calls[0][1]['env']['NEXOL_HOME']==str(s.home)
+    assert 'NEXOL_NO_BROWSER' not in calls[0][1]['env']
+
+
+def test_waiting_for_real_process_never_terminates_it():
+    import subprocess,sys
+    child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(.2)'])
+    updater.wait_for_process(child.pid,timeout=5)
+    assert child.wait(timeout=2)==0
+
+
+def test_install_bridge_requires_csrf_and_only_arms_verified_stage(setup):
+    import requests
+    from network.client import start_client
+    s=setup;check(s);(s.program/'NexSearch Maintenance.exe').write_bytes(b'fixture')
+    root=Path(__file__).resolve().parents[2]
+    trust={'host_id':'e5fa46a8-98fd-4138-acb8-3c6503f01e22','fingerprint':'a'*64}
+    server,agent,close=start_client(trust,s.home,root/'network/web',port=0,open_browser=False,discovery=False)
+    agent.updater=SimpleNamespace(program=s.program)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();url='http://127.0.0.1:'+str(server.server_port)
+    try:
+        assert requests.get(url+'/api/client/update/status').json()['supports_restart']
+        assert requests.post(url+'/api/client/update/install',json={}).status_code==403
+        response=requests.post(url+'/api/client/update/install',json={},headers={'Origin':url,'X-Nexol-CSRF':agent.csrf})
+        assert response.status_code==200 and response.json()['restart_scheduled']
+    finally:server.shutdown();close();thread.join(5)

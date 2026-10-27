@@ -16,7 +16,7 @@ def safe_target(base,name):
 
 def prepare(archive,program,home,role):
  program=Path(program).resolve();home=Path(home).resolve();public=program/'updates-public.pem'
- if role not in ('HostWindows','EmployeeWindows','EmployeeMac','HostUbuntu'):raise UpdateError('Неизвестная платформа обновления')
+ if role not in ('HostWindows','EmployeeWindows','EmployeeMac','HostUbuntu','OfficeTunnel'):raise UpdateError('Неизвестная платформа обновления')
  if not public.is_file():raise UpdateError('Нет доверенного ключа обновлений')
  with zipfile.ZipFile(archive) as z:
   try:raw=z.read('release.json');signature=z.read('release.sig');load_pem_public_key(public.read_bytes()).verify(signature,raw)

@@ -193,7 +193,7 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
                 from .daily_updates import local_status
                 updater=getattr(agent,'updater',None)
                 program=updater.program if updater else Path(resources).parent.parent
-                return self.send(local_status(program,agent.home))
+                return self.send({**local_status(program,agent.home),'supports_restart':bool(updater)})
             # The login screen is local so an absent host never produces a blank page.
             base=Path(resources)
             if path=='/':return self.send((base/'index.html').read_bytes(),headers={'Content-Type':'text/html; charset=utf-8'})
@@ -234,6 +234,11 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
                     updater=getattr(agent,'updater',None)
                     if updater:threading.Thread(target=updater.check,args=(True,),daemon=True).start()
                     return self.send({'queued':bool(updater)})
+                if self.path=='/api/client/update/install':
+                    updater=getattr(agent,'updater',None)
+                    if not updater:return self.send({'error':'Откройте программу сотрудника'},400)
+                    from .daily_updates import request_restart
+                    return self.send(request_restart(updater.program,agent.home))
                 if self.path=='/api/client/exit':
                     try:agent.request('/api/activity','POST',json.dumps({'kind':'session.exit','details':{}}).encode())
                     except Exception:pass
