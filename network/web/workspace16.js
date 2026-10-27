@@ -42,16 +42,20 @@ load=async(ticket=nav)=>{
  if(ticket!==nav)return;
  if(view==='mail')return loadMail16();
  if(['search','clients','carriers'].includes(view)){
-  const section=view,sequence=++listRequest16,owner=user?.id,person=readonly?teamPerson?.id:null;let data,stageValues;
+  const section=view,sequence=++listRequest16,owner=user?.id,person=readonly?teamPerson?.id:null;let data,stageValues,overviewData;
   if(section==='search')data=(await api('/api/leads')).companies;
   if(section==='carriers')data=(await api('/api/carriers')).carriers;
   if(section==='clients'){
-   if(person){data=(await api('/api/admin/employees/'+person+'/clients')).companies;stageValues=[...new Set(data.map(c=>c.stage||'В работе'))]}
+   if(typeof clientOverview167==='function'&&clientOverview167()){
+    overviewData=await api('/api/clients/overview?order='+encodeURIComponent($('#client-order').value)+clientOverviewQuery167());data=overviewData.companies;stageValues=overviewData.stages;
+   }
+   else if(person){data=(await api('/api/admin/employees/'+person+'/clients')).companies;stageValues=[...new Set(data.map(c=>c.stage||'В работе'))]}
    else {const result=await Promise.all([api('/api/clients?order='+encodeURIComponent($('#client-order').value)),api('/api/clients/stages')]);data=result[0].companies;stageValues=result[1].stages}
   }
   if(sequence!==listRequest16||ticket!==nav||view!==section||user?.id!==owner||person!==(readonly?teamPerson?.id:null))return;
   if(section==='carriers')carriers=data;else rows=data;
   if(stageValues){const selected=$('#stage-filter').value;stages=stageValues;$('#stage-filter').innerHTML='<option value="">Все этапы</option>'+stages.map(s=>`<option value="${esc(s)}">${esc(s||'В работе')}</option>`).join('');$('#stage-filter').value=selected}
+  if(overviewData)drawClientOverview167(overviewData);
   render();return;
  }
  if(!['team','history','today','tasks','orders'].includes(view))return;

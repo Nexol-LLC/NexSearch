@@ -10,7 +10,7 @@ async function downloadFile16(response,name,excel=false){
 }
 window.NexDownload16=downloadFile16;
 document.addEventListener('click',async event=>{
- const link=event.target.closest('a[href^="/api/export"]');if(!link)return;event.preventDefault();event.stopImmediatePropagation();
+ const link=event.target.closest('a[href^="/api/export"],a[href^="/api/clients/overview/export"]');if(!link)return;event.preventDefault();event.stopImmediatePropagation();
  if(link.dataset.downloading16)return;
  const href=link.getAttribute('href'),section={search:'компании',clients:'клиенты',carriers:'перевозчики'}[view]||'выгрузка';
  link.dataset.downloading16='true';link.setAttribute('aria-busy','true');
