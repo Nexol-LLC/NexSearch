@@ -126,7 +126,9 @@ def run_host():
         else:raise RuntimeError('Хост не запустился за 30 секунд')
         discovery=HostDiscovery(trust,port,db)
         profile=admin_session(db,home);profile['host_url']=f'https://127.0.0.1:{port}'
-        bridge,agent,bridge_close=start_client(trust,home/'interface',resources()/'network/web',port=int(os.environ.get('NEXOL_UI_PORT','8765')),open_browser=False,profile=profile,discovery=False)
+        from .internet_access import load_profile
+        internet,profile_error=load_profile(program_dir(),trust,resources())
+        bridge,agent,bridge_close=start_client(trust,home/'interface',resources()/'network/web',port=int(os.environ.get('NEXOL_UI_PORT','8765')),open_browser=False,profile=profile,discovery=False,internet_profile=internet,profile_error=profile_error)
         instance.ready(bridge.server_port);open_window(f'http://127.0.0.1:{bridge.server_port}/',home,program_dir(),'host');bridge.serve_forever()
     except Exception:show_error(home);raise
     finally:
@@ -154,7 +156,9 @@ def run_employee():
     if not instance.acquire():return
     close=None;updater=None
     try:
-        server,agent,close=start_client(trust,home,resources()/'network/web',port=int(os.environ.get('NEXOL_UI_PORT','8765')),open_browser=False)
+        from .internet_access import load_profile
+        internet,profile_error=load_profile(program_dir(),trust,resources())
+        server,agent,close=start_client(trust,home,resources()/'network/web',port=int(os.environ.get('NEXOL_UI_PORT','8765')),open_browser=False,internet_profile=internet,profile_error=profile_error)
         from .daily_updates import DailyUpdater,install_schedule
         install_schedule(program_dir(),home,trust)
         updater=agent.updater=DailyUpdater(agent,program_dir())

@@ -31,7 +31,7 @@ class PinnedAdapter(HTTPAdapter):
         conn.cert_reqs=ssl.CERT_NONE;conn.assert_fingerprint=self.fingerprint
 
 class EmployeeAgent:
-    def __init__(self,trust,home,profile=None):
+    def __init__(self,trust,home,profile=None,internet_profile=None,profile_error=''):
         self.trust=trust;self.home=Path(home);self.home.mkdir(parents=True,exist_ok=True)
         self.path=self.home/'employee.sec';self.state=secure_store.read(self.path,{})
         if profile:self.state.update(profile)
@@ -40,66 +40,80 @@ class EmployeeAgent:
         self.csrf=secrets.token_urlsafe(32);self.lock=threading.Lock();self.url=self.state.get('host_url');self.discovery=None;self.legacy_paths=[];self.import_lock=threading.Lock()
         self.session=requests.Session();self.session.trust_env=False;self.session.mount('https://',PinnedAdapter(trust['fingerprint']))
         self.preference=self.state.get('connection_preference','auto')
-        if self.preference not in ('auto','lan','vpn'):self.preference='auto'
+        if self.preference not in ('auto','lan','vpn','internet'):self.preference='auto'
         self.lan_url=self.url;self.vpn_url=None;self.connection_mode='lan' if self.url else None;self.last_lan_probe=0.
-        if self.preference=='vpn':self.url=None;self.connection_mode=None
+        self.lan_online=bool(self.lan_url);self.vpn_online=False
+        from .internet_access import validate_profile,InternetMonitor
+        self.internet_profile=validate_profile(internet_profile,trust) if internet_profile else None
+        self.internet_url=self.internet_profile['url'] if self.internet_profile else None;self.internet_online=False;self.internet_error=profile_error
+        self.internet_checked_at=None
+        if self.preference in ('vpn','internet'):self.url=None;self.connection_mode=None
         from .remote_access import RemoteAccess
         self.vpn=RemoteAccess(self.home/'vpn',trust,device=self.state['device_id'],on_remote=self.remote_found)
+        self.internet=InternetMonitor(self)
+    def _choose(self):
+        choices={'lan':self.lan_url if self.lan_online else None,'internet':self.internet_url if self.internet_online else None,'vpn':self.vpn_url if self.vpn_online else None}
+        order=('lan','internet','vpn') if self.preference=='auto' else (self.preference,)
+        selected=next(((mode,choices[mode]) for mode in order if choices.get(mode)),(None,None))
+        self.connection_mode,self.url=selected
+        if self.state.get('active_host_url')!=self.url or self.state.get('active_transport')!=self.connection_mode:
+            self.state.update(active_host_url=self.url,active_transport=self.connection_mode);secure_store.write(self.path,self.state)
     def transport(self):
-        with self.lock:return dict(preference=self.preference,transport=self.connection_mode,host_url=self.url,host_found=bool(self.url))
+        with self.lock:return dict(preference=self.preference,transport=self.connection_mode,host_url=self.url,host_found=bool(self.url),internet_configured=bool(self.internet_url),internet_online=self.internet_online,internet_url=self.internet_url,internet_error=self.internet_error,internet_checked_at=self.internet_checked_at)
     def select_transport(self,mode):
-        if mode not in ('auto','lan','vpn'):raise ValueError('Неизвестный способ подключения')
+        if mode not in ('auto','lan','vpn','internet'):raise ValueError('Неизвестный способ подключения')
         with self.lock:
+            was_internet=self.preference=='internet'
             self.preference=mode;self.state['connection_preference']=mode;secure_store.write(self.path,self.state)
-            self.url=None;self.connection_mode=None;self.last_lan_probe=0;lan=self.lan_url;vpn=self.vpn_url
+            self._choose();lan=self.lan_url;vpn=self.vpn_url
+        if mode=='internet':self.vpn.close()
         if mode=='vpn' and not self.vpn.config['enabled']:self.vpn.configure({**self.vpn.config,'enabled':True})
+        elif mode=='vpn' and was_internet:self.vpn.start()
         if mode in ('auto','lan') and lan:self.found(lan)
-        if mode!='lan' and vpn:self.remote_found(vpn)
+        if mode in ('auto','vpn') and vpn:self.remote_found(vpn)
+        self.internet.nudge()
         return self.transport()
-    def remote_found(self,url):
+    def lan_health(self,url,online):
         with self.lock:
-            previous=self.vpn_url;self.vpn_url=url;lan=self.lan_url;current=self.url;mode=self.preference
-        if not url:
+            if self.lan_url!=url:return
+            self.lan_online=online;self._choose()
+    def internet_health(self,url,online):
+        from datetime import datetime,timezone
+        with self.lock:
+            if self.internet_url!=url:return
+            self.internet_online=online;self.internet_checked_at=datetime.now(timezone.utc).isoformat();self._choose()
+    def remote_found(self,url):
+        from .internet_access import healthy
+        with self.lock:
+            self.vpn_url=url;self.vpn_online=False;lan=self.lan_url;mode=self.preference
+        if url and mode in ('auto','vpn'):
+            if mode=='auto' and lan:self.lan_health(lan,healthy(self.session,lan,self.trust['host_id']))
+            online=healthy(self.session,url,self.trust['host_id'])
             with self.lock:
-                if self.url==previous:
-                    self.url=lan if self.preference!='vpn' else None;self.connection_mode='lan' if self.url else None
-            return
-        if mode=='lan':return
-        if mode=='auto' and lan and current==lan and time_since(self.last_lan_probe)<10:return
-        self.last_lan_probe=__import__('time').monotonic()
-        if mode=='auto' and lan:
-            try:
-                reply=self.session.get(lan+'/api/host-info',timeout=1,allow_redirects=False)
-                if reply.ok and reply.json().get('host_id')==self.trust['host_id']:
-                    with self.lock:
-                        if self.preference!='vpn':self.url=lan;self.connection_mode='lan'
-                    return
-            except (requests.RequestException,ValueError):pass
-        try:
-            reply=self.session.get(url+'/api/host-info',timeout=2,allow_redirects=False)
-            if reply.ok and reply.json().get('host_id')==self.trust['host_id']:
-                with self.lock:
-                    if self.preference!='lan':self.url=url;self.connection_mode='vpn'
-        except (requests.RequestException,ValueError):pass
+                if self.vpn_url==url:self.vpn_online=online
+        with self.lock:self._choose()
     def found(self,url):
         if not is_local(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit(url).hostname):return
-        try:
-            response=self.session.get(url+'/api/host-info',timeout=2)
-            if response.ok and response.json().get('host_id')==self.trust['host_id']:
-                with self.lock:
-                    self.lan_url=url;self.state['host_url']=url;secure_store.write(self.path,self.state)
-                    if self.preference!='vpn':self.url=url;self.connection_mode='lan'
-                if self.state.get('token'):self.import_legacy()
-        except requests.RequestException:pass
+        from .internet_access import healthy
+        good=healthy(self.session,url,self.trust['host_id'])
+        with self.lock:
+            if good:
+                self.lan_url=url;self.lan_online=True;self.state['host_url']=url;secure_store.write(self.path,self.state)
+            elif self.lan_url==url:self.lan_online=False
+            self._choose();token=self.state.get('token')
+        if good and token:self.import_legacy()
     def request(self,path,method='GET',body=b'',content_type='application/json'):
         with self.lock:url=self.url;token=self.state.get('token')
-        if not url:raise ConnectionError('Ожидаем хост по выбранному способу подключения. Проверьте настройки сети и VPN.')
+        if not url:raise ConnectionError('Ожидаем хост по выбранному способу подключения. Проверьте состояние подключения.')
         headers={'Content-Type':content_type}
         if token:headers['Authorization']='Bearer '+token
         payload=None
         if path in ('/api/auth/register','/api/auth/login'):
             payload=json.loads(body);payload.update(device_id=self.state['device_id'],computer_name=self.state['computer_name']);body=json.dumps(payload).encode()
-        response=self.session.request(method,url+path,data=body if method not in ('GET','HEAD') else None,headers=headers,timeout=(3,90),allow_redirects=False)
+        try:response=self.session.request(method,url+path,data=body if method not in ('GET','HEAD') else None,headers=headers,timeout=(3,90),allow_redirects=False)
+        except requests.RequestException:
+            self.internet.nudge()
+            raise  # A failed write may already have committed: never resend it automatically.
         if path in ('/api/auth/register','/api/auth/login') and response.ok:
             data=response.json()
             with self.lock:
@@ -140,8 +154,8 @@ class EmployeeAgent:
         code,_,_=self.request('/api/import/legacy','POST',json.dumps({'companies':companies}).encode())
         if code!=200:raise ConnectionError('Хост не подтвердил перенос базы')
 
-def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,discovery=True):
-    agent=EmployeeAgent(trust,home,profile)
+def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,discovery=True,internet_profile=None,profile_error=''):
+    agent=EmployeeAgent(trust,home,profile,internet_profile,profile_error)
     class Invitation(BaseHTTPRequestHandler):
         def log_message(self,*_):pass
         def do_POST(self):
@@ -212,6 +226,8 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
                 if length<0 or length>5*1024*1024:return self.send({'error':'Слишком большой запрос'},413)
                 body=self.rfile.read(length)
                 if self.path=='/api/client/transport':return self.send(agent.select_transport(json.loads(body)['mode']))
+                if self.path=='/api/client/internet/check':
+                    agent.internet.nudge();return self.send(agent.transport())
                 if self.path=='/api/client/vpn/config':return self.send(agent.vpn.configure(json.loads(body)))
                 if self.path=='/api/client/vpn/login':return self.send(agent.vpn.login())
                 if self.path=='/api/client/update/check':
@@ -237,10 +253,11 @@ def start_client(trust,home,resources,port=8765,open_browser=True,profile=None,d
         from .broadcast import EmployeeBroadcast
         agent.broadcast=EmployeeBroadcast(trust,agent.found)
     if agent.url:threading.Thread(target=agent.found,args=(agent.url,),daemon=True).start()
-    agent.vpn.start()
+    if agent.preference!='internet':agent.vpn.start()
+    agent.internet.start()
     if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}')
     def close():
-        agent.vpn.close()
+        agent.internet.close();agent.vpn.close()
         server.shutdown();server.server_close();callback.shutdown();callback.server_close()
         if agent.discovery:agent.discovery.close()
         if getattr(agent,'broadcast',None):agent.broadcast.close()

@@ -75,12 +75,12 @@ def test_lan_is_preferred_and_vpn_requires_same_pinned_host(tmp_path):
     def get(url,**kw):
         requested.append((url,kw));assert kw['allow_redirects'] is False
         if url.startswith(agent.lan_url) and not lan_online:raise requests.ConnectionError()
-        return SimpleNamespace(ok=True,json=lambda:{'host_id':identity})
+        return SimpleNamespace(status_code=200,ok=True,json=lambda:{'host_id':identity})
     agent.session.get=get
     try:
         agent.remote_found('https://127.0.0.1:4200');assert agent.connection_mode=='lan'
         lan_online=False;agent.last_lan_probe=0
-        identity='another-host';agent.remote_found('https://127.0.0.1:4200');assert agent.connection_mode=='lan'
+        identity='another-host';agent.remote_found('https://127.0.0.1:4200');assert agent.connection_mode is None
         identity=TRUST['host_id'];agent.last_lan_probe=0
         agent.remote_found('https://127.0.0.1:4200');assert agent.connection_mode=='vpn'
         assert agent.url=='https://127.0.0.1:4200'
@@ -88,7 +88,7 @@ def test_lan_is_preferred_and_vpn_requires_same_pinned_host(tmp_path):
         adapter=agent.session.get_adapter(agent.url);assert adapter.fingerprint==TRUST['fingerprint']
         lan_online=True;agent.remote_found('https://127.0.0.1:4200');assert agent.connection_mode=='lan'
         lan_online=False;agent.last_lan_probe=0;agent.remote_found('https://127.0.0.1:4200')
-        agent.remote_found(None);assert agent.url==agent.lan_url and agent.connection_mode=='lan'
+        agent.remote_found(None);assert agent.url is None and agent.connection_mode is None  # An unavailable LAN is not reported as connected.
     finally:agent.vpn.close();agent.session.close()
 
 def test_bridge_vpn_mutations_require_origin_and_csrf(tmp_path):
@@ -111,7 +111,7 @@ def test_bridge_vpn_mutations_require_origin_and_csrf(tmp_path):
 def test_forced_vpn_cannot_fall_back_to_healthy_lan_and_choice_survives_restart(tmp_path):
     agent=EmployeeAgent(TRUST,tmp_path,profile={'host_url':'https://192.168.0.102:8743'})
     agent.vpn.config['enabled']=True  # No real external enrollment in unit tests.
-    agent.session.get=lambda *args,**kw:SimpleNamespace(ok=True,json=lambda:{'host_id':TRUST['host_id']})
+    agent.session.get=lambda *args,**kw:SimpleNamespace(status_code=200,ok=True,json=lambda:{'host_id':TRUST['host_id']})
     try:
         state=agent.select_transport('vpn');assert state['preference']=='vpn' and not state['host_found']
         with pytest.raises(ConnectionError):agent.request('/api/state')
