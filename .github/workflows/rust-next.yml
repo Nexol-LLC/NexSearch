@@ -1,0 +1,34 @@
+name: NexSearch 2.0 checks
+on:
+  push:
+    branches: ['next/**']
+    paths: ['next/**', '.github/workflows/rust-next.yml']
+  pull_request:
+    paths: ['next/**', '.github/workflows/rust-next.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: rustup toolchain install nightly-2026-11-10 --profile minimal --component rustfmt --component clippy
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: node --test ui/state.test.mjs
+      - run: node tools/verify-ui.mjs
+      - run: cargo build -p nexsearch-desktop -p nexsearch-host --locked

@@ -1,0 +1,6 @@
+# Snapshot bytes are part of the compatibility evidence on every platform.
+legacy-ui/** -text
+*.rs text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.mjs text eol=lf

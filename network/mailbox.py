@@ -69,9 +69,40 @@ def public_socket(host,port,timeout=12):
 
 class SecureIMAP(imaplib.IMAP4_SSL):
     max_literal=256*1024
+    def __init__(self,*args,**kwargs):
+        # A socket timeout alone restarts after each read: a drip-fed response can
+        # otherwise keep the account locked indefinitely.
+        self.deadline=time.monotonic()+45
+        self._read_buffer=bytearray()
+        super().__init__(*args,**kwargs)
+    def _read_budget(self):
+        remaining=self.deadline-time.monotonic()
+        if remaining<=0:raise TimeoutError('IMAP operation deadline exceeded')
+        if getattr(self,'sock',None):self.sock.settimeout(min(12,remaining))
     def read(self,size):
         if size>self.max_literal:raise MailError('Почтовый сервер прислал слишком большой блок данных')
-        return super().read(size)
+        result=bytearray()
+        while len(result)<size:
+            self._read_budget()
+            if self._read_buffer:
+                take=min(size-len(result),len(self._read_buffer));result+=self._read_buffer[:take];del self._read_buffer[:take]
+            else:
+                chunk=self.file.read1(min(size-len(result),64*1024))
+                if not chunk:break
+                result+=chunk
+        return bytes(result)
+    def readline(self):
+        while True:
+            self._read_budget()
+            end=self._read_buffer.find(b'\n')
+            if end>=0:
+                if end+1>imaplib._MAXLINE:raise self.error('IMAP line exceeds maximum length')
+                result=bytes(self._read_buffer[:end+1]);del self._read_buffer[:end+1];return result
+            if len(self._read_buffer)>imaplib._MAXLINE:raise self.error('IMAP line exceeds maximum length')
+            chunk=self.file.read1(min(64*1024,imaplib._MAXLINE+1-len(self._read_buffer)))
+            if not chunk:
+                result=bytes(self._read_buffer);self._read_buffer.clear();return result
+            self._read_buffer+=chunk
     def _create_socket(self,timeout):
         sock=public_socket(self.host,self.port,timeout or 12)
         try:return self.ssl_context.wrap_socket(sock,server_hostname=self.host)
@@ -187,15 +218,22 @@ def headers(raw,metadata):
 class Mailbox:
     def __init__(self,db):
         self.db=db;self.stopping=threading.Event();self.thread=None
-        self.locks=[threading.Lock() for _ in range(64)];self.slots=threading.BoundedSemaphore(3)
+        self.locks={};self.slots=threading.BoundedSemaphore(3)
+        self.registry_lock=threading.Lock()
         self.pool=None;self.inflight={};self.next_due={}
-        self.connection_locks=[threading.RLock() for _ in range(64)]
+        self.connection_locks={}
         from .mail_images import ImageCache
         self.images=ImageCache()
 
+    def operation_lock(self,ident):
+        with self.registry_lock:return self.locks.setdefault(str(ident),threading.Lock())
+
+    def connection_lock(self,ident):
+        with self.registry_lock:return self.connection_locks.setdefault(str(ident),threading.RLock())
+
     @contextmanager
     def connection(self,account):
-        client=None;phase='connect';lock=self.connection_locks[hash(str(account['id']))%len(self.connection_locks)]
+        client=None;phase='connect';lock=self.connection_lock(account['id'])
         if not lock.acquire(timeout=4):raise Conflict('Почта обновляется. Повторите действие через несколько секунд.')
         acquired=False
         try:
@@ -258,8 +296,9 @@ class Mailbox:
         return ident
 
     def sync(self,owner,ident,folder='INBOX',before_uid=None):
-        lock=self.locks[hash(str(ident))%len(self.locks)]
-        if not lock.acquire(blocking=False):raise Conflict('Почта уже синхронизируется')
+        self.account(owner,ident)  # Check ownership even when a background job is running.
+        lock=self.operation_lock(ident)
+        if not lock.acquire(blocking=False):return {'syncing':True,'loaded':0,'folder':folder}
         try:
             return self.reconnect_read(lambda:self._sync(owner,ident,folder,before_uid))
         except MailError as error:
@@ -366,7 +405,7 @@ class Mailbox:
         return str(part.get_filename() or 'attachment'),part.get_payload(decode=True) or b''
 
     def settings(self,owner,ident,body):
-        lock=self.locks[hash(str(ident))%len(self.locks)]
+        lock=self.operation_lock(ident)
         if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
         try:return self._settings(owner,ident,body)
         finally:lock.release()
@@ -396,7 +435,7 @@ class Mailbox:
     def create_folder(self,owner,ident,name,parent=''):
         account=self.account(owner,ident);name=name.strip()
         if not name or len(name)>100 or any(ord(c)<32 for c in name):raise MailError('Укажите название папки до 100 символов')
-        lock=self.locks[hash(str(ident))%len(self.locks)]
+        lock=self.operation_lock(ident)
         if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
         try:
             with self.connection(account) as client:
@@ -424,7 +463,7 @@ class Mailbox:
 
     def mark_many(self,owner,ident,ids,seen):
         self.account(owner,ident)
-        lock=self.locks[hash(str(ident))%len(self.locks)]
+        lock=self.operation_lock(ident)
         if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
         try:return self._mark_many(owner,ident,ids,seen)
         finally:lock.release()
@@ -447,7 +486,7 @@ class Mailbox:
 
     def move(self,owner,ident,folder):
         row=self.message(owner,ident)
-        lock=self.locks[hash(str(row['account_id']))%len(self.locks)]
+        lock=self.operation_lock(row['account_id'])
         if not lock.acquire(blocking=False):raise Conflict('Дождитесь завершения синхронизации почты')
         try:return self._move(owner,ident,folder)
         finally:lock.release()

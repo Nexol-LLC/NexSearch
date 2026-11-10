@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/jobs", "crates/compute", "crates/bridge", "crates/host", "crates/desktop"]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+nexsearch-core = { path = "crates/core" }
+nexsearch-compute = { path = "crates/compute" }
+nexsearch-bridge = { path = "crates/bridge" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = { version = "2", features = ["serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net", "io-util", "test-util"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

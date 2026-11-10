@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-10",
+  "status": "migration-in-progress",
+  "production_ready": false,
+  "interface_baseline": "1.6.7",
+  "preserved_files_sha256_verified": 68,
+  "rust_tests_passed": 24,
+  "legacy_mail_tests_passed": 31,
+  "javascript_state_tests_passed": 3,
+  "rustfmt": "passed",
+  "clippy_all_targets_deny_warnings": "passed",
+  "windows_tauri_build": "passed",
+  "observed_native_window": "Original 1.6.7 login screen, local assets, Rust bridge; no account submitted",
+  "office_connection_tested": false,
+  "vps_connection_tested": false,
+  "native_window_offline": true,
+  "full_functional_parity_verified": false,
+  "physical_mac_ubuntu_and_legacy_cpu_tested": false,
+  "known_dependency_warnings": ["RUSTSEC-2024-0370", "RUSTSEC-2024-0429"],
+  "production_server_modified": false,
+  "github_published": false
+}

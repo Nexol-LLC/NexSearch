@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Только локальное главное окно предварительной версии",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["allow-legacy-request","allow-open-external","allow-save-file","allow-quit-app","allow-system-info"]
+}

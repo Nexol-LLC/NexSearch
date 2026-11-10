@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-task-preview"
+description = "Enables the add_task_preview command without any pre-configured scope."
+commands.allow = ["add_task_preview"]
+
+[[permission]]
+identifier = "deny-add-task-preview"
+description = "Denies the add_task_preview command without any pre-configured scope."
+commands.deny = ["add_task_preview"]

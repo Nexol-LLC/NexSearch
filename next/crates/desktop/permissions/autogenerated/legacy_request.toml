@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-legacy-request"
+description = "Enables the legacy_request command without any pre-configured scope."
+commands.allow = ["legacy_request"]
+
+[[permission]]
+identifier = "deny-legacy-request"
+description = "Denies the legacy_request command without any pre-configured scope."
+commands.deny = ["legacy_request"]

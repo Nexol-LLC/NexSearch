@@ -1,0 +1,5 @@
+import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';import {dirname,resolve} from 'node:path';
+const next=resolve(dirname(fileURLToPath(import.meta.url)),'..'),manifest=JSON.parse(readFileSync(resolve(next,'ui-source.json')));
+for(const item of manifest.files){const content=readFileSync(resolve(next,'legacy-ui',item.destination));assert.equal(createHash('sha256').update(content).digest('hex'),item.sha256,item.destination);if(!item.adaptation)assert.equal(item.sha256,item.source_sha256,item.destination);}
+const html=readFileSync(resolve(next,'legacy-ui/index.html'),'utf8');assert(html.includes('/assets/workspace167.js'));assert(html.indexOf('/assets/rust_bridge.js')<html.indexOf('/assets/app.js'));assert(manifest.files.some(f=>f.destination==='pack/src/axles.js'));assert(manifest.files.some(f=>f.destination==='pack/vendor/three.min.js'));
+console.log(`Проверены ${manifest.files.length} файлов: исходный интерфейс 1.6.7, стили и PackOnTruck сохранены.`);
