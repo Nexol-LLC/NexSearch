@@ -12,9 +12,9 @@ for(const source of paths){
  const bytes=readFileSync(resolve(root,source));
  const destination=source==='network/web/index.html'?'index.html':source.startsWith('network/web/')?'assets/'+source.slice('network/web/'.length):source;
  let content=bytes;
- if(destination==='index.html') content=Buffer.from(bytes.toString('utf8').replace('<script src="/assets/server_access.js">','<script src="/assets/rust_bridge.js"></script><script src="/assets/server_access.js">'));
+ if(destination==='index.html') content=Buffer.from(bytes.toString('utf8').replace('<script src="/assets/server_access.js">','<script src="/assets/rust_bridge.js"></script><script src="/assets/server_access.js">').replace('</head>','<link rel="stylesheet" href="/assets/workspace20.css"></head>').replace('</body>','<script src="/assets/workspace20.js"></script></body>'));
  const target=resolve(out,destination);mkdirSync(dirname(target),{recursive:true});writeFileSync(target,content);
- files.push({source,destination,source_sha256:createHash('sha256').update(bytes).digest('hex'),sha256:createHash('sha256').update(content).digest('hex'),adaptation:destination==='index.html'?'Rust bridge script inserted before original scripts':null});
+ files.push({source,destination,source_sha256:createHash('sha256').update(bytes).digest('hex'),sha256:createHash('sha256').update(content).digest('hex'),adaptation:destination==='index.html'?'Rust bridge and separate 2.0 additions; original scripts and styles retained':null});
 }
 writeFileSync(resolve(next,'ui-source.json'),JSON.stringify({baseline_version:'1.6.7',reference_commit:commit,source:'current working tree; confirmed mail fixes included',files},null,2)+'\n');
 console.log(`Перенесено файлов интерфейса и погрузки: ${files.length}. CSS и порядок исходных скриптов сохранены.`);

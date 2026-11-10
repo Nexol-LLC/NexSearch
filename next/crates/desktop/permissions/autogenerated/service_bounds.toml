@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-service-bounds"
+description = "Enables the service_bounds command without any pre-configured scope."
+commands.allow = ["service_bounds"]
+
+[[permission]]
+identifier = "deny-service-bounds"
+description = "Denies the service_bounds command without any pre-configured scope."
+commands.deny = ["service_bounds"]

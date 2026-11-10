@@ -34,6 +34,14 @@ impl Model {
         if !samples.iter().any(|s| s.positive) || !samples.iter().any(|s| !s.positive) {
             return Err(ComputeError::InsufficientOutcomes);
         }
+        if !samples.iter().skip(1).any(|s| {
+            s.features
+                .iter()
+                .zip(&samples[0].features)
+                .any(|(a, b)| (a - b).abs() > 1e-9)
+        }) {
+            return Err(ComputeError::InsufficientOutcomes);
+        }
         let mut model = Self {
             weights: vec![0.; dimensions],
             bias: 0.,

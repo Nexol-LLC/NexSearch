@@ -11,6 +11,13 @@ pub enum Theme {
     Dark,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Density {
+    Comfortable,
+    Compact,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "ServiceInput")]
 pub struct PersonalService {
@@ -60,6 +67,7 @@ impl PersonalService {
 pub struct Preferences {
     pub employee_id: Uuid,
     pub theme: Theme,
+    pub density: Option<Density>,
     pub accent: [u8; 3],
     pub reduced_motion: bool,
     pub proactive_search: bool,
@@ -70,6 +78,7 @@ impl Default for Preferences {
         Self {
             employee_id: Uuid::nil(),
             theme: Theme::System,
+            density: None,
             accent: [111, 100, 236],
             reduced_motion: false,
             proactive_search: false,
@@ -84,6 +93,9 @@ impl Preferences {
         }
         if self.services.iter().any(|s| s.url == service.url) {
             return Err("Эта ссылка уже добавлена");
+        }
+        if self.services.iter().any(|s| s.id == service.id) {
+            return Err("Такой идентификатор сервиса уже используется");
         }
         self.services.push(service);
         Ok(())
@@ -109,6 +121,7 @@ mod tests {
     fn preferences_roundtrip_and_no_duplicates() {
         let mut p = Preferences {
             theme: Theme::Dark,
+            density: Some(Density::Compact),
             ..Default::default()
         };
         p.add_service(PersonalService::new("Карты", "https://example.org").unwrap())
@@ -119,6 +132,7 @@ mod tests {
         );
         let copy: Preferences = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
         assert_eq!(copy.theme, Theme::Dark);
+        assert_eq!(copy.density, Some(Density::Compact));
         assert_eq!(copy.services.len(), 1);
         assert!(serde_json::from_str::<PersonalService>(r#"{"id":"00000000-0000-0000-0000-000000000000","name":"X","url":"javascript:evil()"}"#).is_err());
     }

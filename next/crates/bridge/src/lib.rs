@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use uuid::Uuid;
+pub mod session_store;
+use session_store::{SavedSession, SessionStore};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Trust {
@@ -96,6 +98,7 @@ struct Session {
     endpoint: Option<String>,
     token: Option<String>,
     profile: Option<Value>,
+    device_id: String,
 }
 pub struct Bridge {
     client: reqwest::Client,
@@ -103,8 +106,15 @@ pub struct Bridge {
     session: RwLock<Session>,
     device_id: String,
     csrf: String,
+    store: RwLock<Option<SessionStore>>,
 }
 impl Bridge {
+    pub fn storage_scope(&self) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{}:{}", self.trust.host_id, self.trust.fingerprint).as_bytes())
+        )
+    }
     pub fn new(trust: Trust) -> Result<Self, &'static str> {
         if trust.fingerprint.len() != 64 {
             return Err("Некорректная идентичность хоста");
@@ -145,7 +155,77 @@ impl Bridge {
             session: RwLock::new(Session::default()),
             device_id: Uuid::new_v4().to_string(),
             csrf: Uuid::new_v4().to_string(),
+            store: RwLock::new(None),
         })
+    }
+    pub async fn configure_store(&self, path: std::path::PathBuf) -> Result<(), &'static str> {
+        let store = SessionStore::new(path, &self.trust.host_id);
+        if let Some(saved) = store.load()? {
+            if saved.host_id != self.trust.host_id || saved.fingerprint != self.trust.fingerprint {
+                return Err("Сохранённый сеанс относится к другому хосту");
+            }
+            let mut state = self.session.write().await;
+            state.token = saved.token;
+            state.profile = saved.profile;
+            state.device_id = saved.device_id;
+        }
+        *self.store.write().await = Some(store);
+        Ok(())
+    }
+    async fn save_session(&self) -> Result<(), &'static str> {
+        let s = self.session.read().await;
+        if let Some(store) = self.store.read().await.as_ref() {
+            store.save(&SavedSession {
+                host_id: self.trust.host_id.clone(),
+                fingerprint: self.trust.fingerprint.clone(),
+                device_id: if s.device_id.is_empty() {
+                    self.device_id.clone()
+                } else {
+                    s.device_id.clone()
+                },
+                token: s.token.clone(),
+                profile: s.profile.clone(),
+            })?;
+        }
+        Ok(())
+    }
+    pub async fn import_session(&self, path: &std::path::Path) -> Result<(), &'static str> {
+        let saved = session_store::read_dpapi(path)?;
+        let token = saved["token"]
+            .as_str()
+            .filter(|s| s.len() <= 256)
+            .ok_or("Сеанс входа не найден")?;
+        let endpoint = self
+            .session
+            .read()
+            .await
+            .endpoint
+            .clone()
+            .ok_or("Сначала подключите проверенный хост")?;
+        let response = self
+            .client
+            .get(format!("{endpoint}/api/me"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| "Хост не подтвердил сеанс")?;
+        if !response.status().is_success() {
+            return Err("Сохранённый вход больше не действует");
+        }
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|_| "Некорректный ответ хоста")?;
+        {
+            let mut s = self.session.write().await;
+            s.token = Some(token.into());
+            s.profile = Some(value["employee"].clone());
+            s.device_id = saved["device_id"]
+                .as_str()
+                .unwrap_or(&self.device_id)
+                .into();
+        }
+        self.save_session().await
     }
     pub async fn connect(&self, endpoint: &str) -> Result<(), &'static str> {
         let url = url::Url::parse(endpoint).map_err(|_| "Некорректный адрес хоста")?;
@@ -162,7 +242,8 @@ impl Bridge {
         let endpoint = endpoint.trim_end_matches('/');
         let response = self
             .client
-            .get(format!("{endpoint}/health"))
+            .get(format!("{endpoint}/api/host-info"))
+            .timeout(Duration::from_secs(5))
             .send()
             .await
             .map_err(|_| "Хост недоступен или не прошёл проверку сертификата")?;
@@ -219,7 +300,7 @@ impl Bridge {
         let Some(endpoint) = endpoint else {
             return Reply::json(
                 503,
-                json!({"error":"Ожидаем проверенный хост. Рабочие данные не изменены."}),
+                json!({"error":"Хост недоступен. Программа восстанавливает соединение."}),
             );
         };
         let mut request = self
@@ -240,7 +321,12 @@ impl Bridge {
             if !value.is_object() {
                 return Reply::json(400, json!({"error":"Некорректный запрос входа"}));
             }
-            value["device_id"] = json!(self.device_id);
+            let device = self.session.read().await.device_id.clone();
+            value["device_id"] = json!(if device.is_empty() {
+                &self.device_id
+            } else {
+                &device
+            });
             value["computer_name"] = json!("NexSearch · Rust");
             body = Some(value.to_string());
         }
@@ -250,6 +336,10 @@ impl Bridge {
             request = request.body(body);
         }
         let Ok(mut response) = request.send().await else {
+            let mut current = self.session.write().await;
+            if current.endpoint.as_deref() == Some(&endpoint) {
+                current.endpoint = None;
+            }
             return Reply::json(
                 503,
                 json!({"error":"Соединение с хостом прервано. Запрос изменения не повторялся автоматически."}),
@@ -294,12 +384,16 @@ impl Bridge {
             let mut s = self.session.write().await;
             s.token = Some(token);
             s.profile = Some(value["employee"].clone());
+            drop(s);
+            let _ = self.save_session().await;
             return Reply::json(status, value);
         }
         if path == "/api/auth/logout" && status < 300 {
             let mut s = self.session.write().await;
             s.token = None;
             s.profile = None;
+            drop(s);
+            let _ = self.save_session().await;
         }
         Reply {
             status,
@@ -309,8 +403,15 @@ impl Bridge {
     }
     pub async fn discover(self: Arc<Self>) {
         loop {
-            if self.session.read().await.endpoint.is_some() {
-                tokio::time::sleep(Duration::from_secs(15)).await;
+            let active = self.session.read().await.endpoint.clone();
+            if let Some(endpoint) = active {
+                if self.connect(&endpoint).await.is_err() {
+                    let mut current = self.session.write().await;
+                    if current.endpoint.as_deref() == Some(&endpoint) {
+                        current.endpoint = None;
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }
             let _ = self.connect("https://127.0.0.1:8743").await;

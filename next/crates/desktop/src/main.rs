@@ -3,7 +3,18 @@ use nexsearch_bridge::{Bridge, Reply, Trust};
 use nexsearch_core::preferences::PersonalService;
 use std::{io::Write, sync::Arc};
 use tauri::{Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
+mod services;
+use services::*;
+mod workspace;
+use workspace::*;
+#[derive(serde::Deserialize)]
+struct RuntimeConnection {
+    endpoint: String,
+    trust: Trust,
+    import_session: Option<std::path::PathBuf>,
+}
 
 #[tauri::command]
 async fn legacy_request(
@@ -62,16 +73,49 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0)
 }
 #[tauri::command]
+fn copy_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    if text.len() > 1024 * 1024 {
+        return Err("Слишком большой текст для копирования".into());
+    }
+    app.clipboard()
+        .write_text(text)
+        .map_err(|_| "Не удалось скопировать текст".into())
+}
+#[tauri::command]
 fn system_info() -> serde_json::Value {
     serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"interface_baseline":"1.6.7","cpu_kernel":nexsearch_compute::Kernel::detect(),"migration_complete":false})
 }
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            let config = std::env::var_os("NEXSEARCH_NEXT_CONFIG")
+                .map(std::path::PathBuf::from)
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|b| serde_json::from_slice::<RuntimeConnection>(&b).ok());
             let trust: Trust =
-                serde_json::from_str(include_str!("../../../../network/client-trust.json"))?;
+                config
+                    .as_ref()
+                    .map(|c| c.trust.clone())
+                    .unwrap_or(serde_json::from_str(include_str!(
+                        "../../../../network/client-trust.json"
+                    ))?);
             let bridge = Arc::new(Bridge::new(trust).map_err(std::io::Error::other)?);
+            let store = app
+                .path()
+                .app_config_dir()?
+                .join(bridge.storage_scope())
+                .join("session.sec");
+            tauri::async_runtime::block_on(async {
+                let _ = bridge.configure_store(store).await;
+                if let Some(config) = &config
+                    && bridge.connect(&config.endpoint).await.is_ok()
+                    && let Some(path) = &config.import_session
+                {
+                    let _ = bridge.import_session(path).await;
+                }
+            });
             app.manage(bridge.clone());
             // Offline is used by UI verification. No office/VPS probe is needed to inspect the preserved interface.
             if std::env::var("NEXSEARCH_NEXT_OFFLINE").as_deref() != Ok("1") {
@@ -82,7 +126,7 @@ fn main() {
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
             )
-            .title("NexSearch 2.0 · интерфейс 1.6.7")
+            .title("NexSearch 2.0")
             .inner_size(1280., 850.)
             .min_inner_size(1000., 680.)
             .on_navigation(|url| {
@@ -99,7 +143,17 @@ fn main() {
             open_external,
             save_file,
             quit_app,
-            system_info
+            system_info,
+            copy_text,
+            service_show,
+            service_hide,
+            service_bounds,
+            service_reload,
+            service_back,
+            workspace_get,
+            workspace_save,
+            workspace_recommendations,
+            custom_service_show
         ])
         .run(tauri::generate_context!())
         .expect("Не удалось открыть NexSearch");

@@ -3,6 +3,6 @@
   "identifier": "main",
   "description": "Только локальное главное окно предварительной версии",
   "local": true,
-  "windows": ["main"],
-  "permissions": ["allow-legacy-request","allow-open-external","allow-save-file","allow-quit-app","allow-system-info"]
+  "webviews": ["main"],
+  "permissions": ["allow-legacy-request","allow-open-external","allow-save-file","allow-quit-app","allow-system-info","allow-copy-text","allow-service-show","allow-service-hide","allow-service-bounds","allow-service-reload","allow-service-back","allow-workspace-get","allow-workspace-save","allow-workspace-recommendations","allow-custom-service-show"]
 }

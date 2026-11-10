@@ -8,14 +8,18 @@ autobins = false
 name = "nexsearch"
 path = "src/main.rs"
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 nexsearch-core.workspace = true
 nexsearch-compute.workspace = true
 nexsearch-bridge.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+uuid.workspace = true
+base64 = "0.23"
 open = "5"
 tempfile = "3"
 tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 [lints]

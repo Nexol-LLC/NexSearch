@@ -48,7 +48,7 @@ async fn fixture() -> (String, Trust, Arc<AtomicUsize>, tokio::task::JoinHandle<
                 }
                 count.fetch_add(1, Ordering::SeqCst);
                 let request = String::from_utf8_lossy(&buffer);
-                let body=if request.starts_with("GET /health "){json!({"host_id":"fixture-host"})}
+                let body=if request.starts_with("GET /api/host-info "){json!({"host_id":"fixture-host"})}
                 else if request.starts_with("POST /api/auth/login "){json!({"token":"fixture-session-secret","employee":{"id":"employee","login":"fixture"}})}
                 else {json!({"authenticated":request.to_ascii_lowercase().contains("authorization: bearer fixture-session-secret")})}.to_string();
                 let response = format!(

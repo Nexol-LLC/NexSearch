@@ -1,6 +1,6 @@
 {
   "baseline_version": "1.6.7",
-  "reference_commit": "6e5fca1648d000370c835ac8fff1e40f38879283",
+  "reference_commit": "60c38682228973a0cc4fcc0b6fd7de77653599b3",
   "source": "current working tree; confirmed mail fixes included",
   "files": [
     {
@@ -70,8 +70,8 @@
       "source": "network/web/index.html",
       "destination": "index.html",
       "source_sha256": "599313aecce85f6bcb2c301b77085ea455eb0dd44f23ca0288ec2e888c61aff2",
-      "sha256": "39cd839f6412c6c91051f4cad2435568882d5502c8614f9e2a8fbc5c2dcbdfd3",
-      "adaptation": "Rust bridge script inserted before original scripts"
+      "sha256": "f1159079131c3ad1f6d64cc2574a5e38dcddaeb865f66d77c8a1ecc7d6a0ecad",
+      "adaptation": "Rust bridge and separate 2.0 additions; original scripts and styles retained"
     },
     {
       "source": "network/web/index13.html",

@@ -6,6 +6,16 @@ fn main() {
             "save_file",
             "quit_app",
             "system_info",
+            "copy_text",
+            "service_show",
+            "service_hide",
+            "service_bounds",
+            "service_reload",
+            "service_back",
+            "workspace_get",
+            "workspace_save",
+            "workspace_recommendations",
+            "custom_service_show",
         ]),
     ))
     .expect("Не удалось подготовить настольное приложение");

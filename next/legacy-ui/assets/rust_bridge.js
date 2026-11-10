@@ -2,6 +2,11 @@
 (()=>{
  'use strict';
  const invoke=(name,args={})=>window.__TAURI__.core.invoke(name,args),originalFetch=window.fetch.bind(window);
+ document.addEventListener('DOMContentLoaded',()=>{
+  document.title='NexSearch 2.0';
+  const brand=document.querySelector('.brand small');if(brand)brand.textContent='версия 2.0';
+  const mark=document.querySelector('.auth-card .eyebrow');if(mark)mark.textContent='NEXSEARCH · 2.0';
+ });
  window.fetch=async(input,options={})=>{
   const request=input instanceof Request?input:null,url=new URL(request?.url||String(input),location.href);
   if(url.origin!==location.origin||!url.pathname.startsWith('/api/'))return originalFetch(input,options);
@@ -20,10 +25,10 @@
   constructor(){super()}close(){this.readyState=2}
  };
  window.NexDesktop=Object.freeze({
-  hide:()=>Promise.resolve(),bounds:()=>Promise.resolve(),route:()=>Promise.resolve(false),
-  show:()=>Promise.reject(Error('Встраивание сервиса переносится. Используйте кнопку «Открыть в браузере».')),
-  back:()=>Promise.resolve(),reload:()=>Promise.resolve(),
-  copy:text=>navigator.clipboard.writeText(String(text)),
+  hide:()=>invoke('service_hide'),bounds:bounds=>invoke('service_bounds',{bounds}),route:()=>Promise.resolve(false),
+  show:(key,bounds)=>key.startsWith('personal:')?invoke('custom_service_show',{id:key.slice(9),bounds}):invoke('service_show',{key,bounds}),
+  back:()=>invoke('service_back'),reload:()=>invoke('service_reload'),
+  copy:text=>invoke('copy_text',{text:String(text)}),
   saveFile:(bytes,name)=>invoke('save_file',{bytes:Array.from(bytes),name}),
   exportXlsx:(bytes,name)=>invoke('save_file',{bytes:Array.from(bytes),name}),
   quit:()=>invoke('quit_app'),notify:()=>Promise.resolve(),clearNotifications:()=>Promise.resolve(),onNotification:()=>{}
