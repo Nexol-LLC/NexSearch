@@ -20,7 +20,26 @@ async function drawPersonal20(){const epoch=settingsEpoch;$('#host-settings-cont
  $('#personal-service-add20').onclick=async()=>{try{const value=structuredClone(personal20);value.preferences.services.push({id:crypto.randomUUID(),name:val('#personal-service-name20').trim(),url:val('#personal-service-url20').trim()});await savePersonal20(value);await drawPersonal20()}catch(e){asyncError16(e)}};
  $$('[data-service-remove20]').forEach(button=>button.onclick=async()=>{try{const value=structuredClone(personal20);value.preferences.services=value.preferences.services.filter(s=>s.id!==button.dataset.serviceRemove20);await savePersonal20(value);await drawPersonal20()}catch(e){asyncError16(e)}});
 }
-const servicesBefore20=buildServices;buildServices=()=>{servicesBefore20();if(view!=='tools')return;const bar=$('#service-switcher');for(const item of personal20?.preferences.services||[]){const button=document.createElement('button');button.type='button';button.dataset.service20=item.id;button.textContent=item.name;button.classList.toggle('active',service==='personal:'+item.id);button.onclick=()=>{service='personal:'+item.id;buildServices();mountService()};bar.append(button)}const manage=document.createElement('button');manage.type='button';manage.textContent='+ Мой сервис';manage.onclick=async()=>{await openHostSettings();selectSettingsTab('personal')};bar.append(manage)};
+const editorBeforeService20=openEditor;openEditor=(...args)=>{$('#editor').classList.remove('service-add-dialog20');editorBeforeService20(...args)};
+async function openPersonalService20(){
+ if(!user)return;
+ if(personalOwner20!==user.id)await loadPersonal20();
+ if(!personal20||personalOwner20!==user?.id)return;
+ const owner=user.id;
+ await window.NexDesktop?.hide();
+ if(owner!==user?.id)return;
+ openEditor('Добавить сервис',`<label>Название<input id="quick-service-name20" required maxlength="80" autocomplete="off" placeholder="Название сервиса"></label><label>Ссылка<input id="quick-service-url20" type="url" required maxlength="4096" placeholder="https://…"></label>`,async()=>{
+  if(owner!==user?.id||personalOwner20!==owner)throw new Error('Учётная запись изменилась. Откройте форму заново.');
+  const value=structuredClone(personal20);
+  value.preferences.services.push({id:crypto.randomUUID(),name:val('#quick-service-name20').trim(),url:val('#quick-service-url20').trim()});
+  await savePersonal20(value);
+  if(view==='tools')buildServices();
+ });
+ $('#editor').classList.add('service-add-dialog20');
+ $('#save-editor').textContent='Добавить';
+ $('#quick-service-name20').focus();
+}
+const servicesBefore20=buildServices;buildServices=()=>{servicesBefore20();if(view!=='tools')return;const bar=$('#service-switcher');for(const item of personal20?.preferences.services||[]){const button=document.createElement('button');button.type='button';button.dataset.service20=item.id;button.textContent=item.name;button.classList.toggle('active',service==='personal:'+item.id);button.onclick=()=>{service='personal:'+item.id;buildServices();mountService()};bar.append(button)}const manage=document.createElement('button');manage.type='button';manage.textContent='+ Мой сервис';manage.onclick=()=>openPersonalService20().catch(asyncError16);bar.append(manage)};
 
 names.recommendations='Подбор клиентов';actionNames['view.recommendations']='Открыт подбор клиентов';
 const recommendationView20=document.createElement('section');recommendationView20.id='recommendations20';recommendationView20.hidden=true;$('main').append(recommendationView20);
