@@ -23,9 +23,20 @@ let _drag = null;          // {box, mesh, offX, offZ, plane}
 let _raycaster, _mouse;
 let _sceneGeometryKey20='',_sceneRecords20=[],_sceneActive20=-1,_cameraFlight20=0,_buildingWorld20=false;
 function stopCameraFlight20(){if(_cameraFlight20)cancelAnimationFrame(_cameraFlight20);_cameraFlight20=0}
+function fitBoundsDistance20(bounds,target){
+ const outward=new THREE.Vector3(Math.sin(_orbit.phi)*Math.cos(_orbit.theta),Math.cos(_orbit.phi),Math.sin(_orbit.phi)*Math.sin(_orbit.theta));
+ const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),outward).normalize(),up=new THREE.Vector3().crossVectors(outward,right);
+ const tangent=Math.tan((_camera.fov||45)*Math.PI/360),horizontal=tangent*(_camera.aspect||1),margin=1.12;let distance=2;
+ const side=WH_GAP+WH_DEPTH/1000;
+ for(const x of [bounds.minX,bounds.maxX])for(const y of [bounds.minY??-1.5,bounds.maxY])for(const z of [-side,bounds.W+side]){
+  const point=new THREE.Vector3(x,y,z).sub(target),depth=point.dot(outward);
+  distance=Math.max(distance,depth+margin*Math.max(Math.abs(point.dot(right))/horizontal,Math.abs(point.dot(up))/tangent));
+ }
+ return distance+1;
+}
 function focusTruck20(index,animate=true){
  const record=_sceneRecords20[index];if(!record)return;_vehicleBounds={...record};
- const target=new THREE.Vector3((record.minX+record.maxX)/2,record.maxY/3,record.W/2),distance=Math.max(record.maxX-record.minX,record.W+2*(WH_GAP+WH_DEPTH/1000),record.maxY)*1.35+2;
+ const target=new THREE.Vector3((record.minX+record.maxX)/2,record.maxY/3,record.W/2),distance=fitBoundsDistance20(record,target);
  stopCameraFlight20();if(!animate||document.documentElement.dataset.motion==='reduced'||matchMedia('(prefers-reduced-motion: reduce)').matches){_orbit.target.copy(target);_orbit.dist=distance;sceneRender();return}
  const from=_orbit.target.clone(),oldDist=_orbit.dist,start=performance.now(),travel=from.distanceTo(target);
  const frame=now=>{const t=Math.min(1,(now-start)/700),ease=t*t*(3-2*t);_orbit.target.copy(from).lerp(target,ease);_orbit.target.y+=Math.sin(Math.PI*t)*Math.min(3,travel*.12);_orbit.dist=oldDist+(distance-oldDist)*ease+Math.sin(Math.PI*t)*Math.min(6,travel*.18);sceneRender();_cameraFlight20=t<1?requestAnimationFrame(frame):0};_cameraFlight20=requestAnimationFrame(frame);
@@ -33,7 +44,7 @@ function focusTruck20(index,animate=true){
 function sceneOverview20(){
  if(!_sceneRecords20.length)return;stopCameraFlight20();
  const minX=Math.min(..._sceneRecords20.map(r=>r.minX)),maxX=Math.max(..._sceneRecords20.map(r=>r.maxX)),maxY=Math.max(..._sceneRecords20.map(r=>r.maxY)),W=Math.max(..._sceneRecords20.map(r=>r.W));
- _vehicleBounds={minX,maxX,minY:Math.min(..._sceneRecords20.map(r=>r.minY)),maxY,W};_orbit.target.set((minX+maxX)/2,maxY/3,W/2);_orbit.dist=Math.max(maxX-minX,W+2*(WH_GAP+WH_DEPTH/1000),maxY)*1.35+2;sceneRender();
+ _vehicleBounds={minX,maxX,minY:Math.min(..._sceneRecords20.map(r=>r.minY)),maxY,W};_orbit.target.set((minX+maxX)/2,maxY/3,W/2);_orbit.dist=fitBoundsDistance20(_vehicleBounds,_orbit.target);sceneRender();
 }
 function disposeSceneTree20(root){const textures=new Set(),materials=new Set(),geometries=new Set();root.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[]){materials.add(m);if(m.map)textures.add(m.map)}});for(const g of geometries)g.dispose();for(const t of textures)t.dispose();for(const m of materials)m.dispose();root.clear()}
 const _packedModels20=new Map();
@@ -151,6 +162,7 @@ function sceneResize(container) {
 
 function sceneRender() {
   if(_buildingWorld20)return;
+  const far=Math.max(500,_orbit.dist*3+100);if(_camera.far!==far){_camera.far=far;_camera.updateProjectionMatrix()}
   const t = _orbit.target;
   _camera.position.set(
     t.x + _orbit.dist * Math.sin(_orbit.phi) * Math.cos(_orbit.theta),

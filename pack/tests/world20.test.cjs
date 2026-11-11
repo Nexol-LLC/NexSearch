@@ -20,6 +20,9 @@ assert.notEqual(result.zones[0],result.zones[1]);assert.equal(result.same,false)
 assert(frames.length);frames[0](700);
 const target=vm.runInContext('_orbit.target.x',context);assert(Math.abs(target-(result.records[1].minX+result.records[1].maxX)/2)<1e-9);
 vm.runInContext('sceneOverview20()',context);const overview=vm.runInContext('_orbit.target.x',context);assert(Math.abs(overview-(result.records[0].minX+result.records[1].maxX)/2)<1e-9);
+// Fit the complete world in a narrow viewport beside the open control panel.
+const fit=vm.runInContext(`(()=>{_camera.aspect=.75;sceneOverview20();_camera.updateMatrixWorld();const points=[];for(const x of [_vehicleBounds.minX,_vehicleBounds.maxX])for(const y of [_vehicleBounds.minY,_vehicleBounds.maxY])for(const z of [-WH_GAP-WH_DEPTH/1000,_vehicleBounds.W+WH_GAP+WH_DEPTH/1000]){const p=new THREE.Vector3(x,y,z).project(_camera);points.push([p.x,p.y,p.z])}return points})()`,context);
+for(const point of fit){assert(Math.abs(point[0])<1);assert(Math.abs(point[1])<1);assert(point[2]>-1&&point[2]<1)}
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/tractor-body20.js'),'utf8'),context);
 const metadata=vm.runInContext('TRACTOR_BODY20',context),body=zlib.gunzipSync(Buffer.from(metadata.data,'base64'));
 assert.equal(body.readUInt32LE(80),36783);assert.equal(body.length,84+36783*50);assert(metadata.min[0]>40);assert(metadata.max[1]>60);

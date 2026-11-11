@@ -1,15 +1,8 @@
 {
   "baseline_version": "1.6.7",
-  "reference_commit": "134abc6c0498b9d1a16597c5a80f3d5fc7931978",
+  "reference_commit": "e3599f46e91c3d9e43b1bb05530aa636aa64f9b7",
   "source": "current working tree; confirmed mail fixes included",
   "files": [
-    {
-      "source": "pack/src/tractor-body20.js",
-      "destination": "pack/src/tractor-body20.js",
-      "source_sha256": "4eede8246ef7a7bc57a4a05194e9593fc5f1ed0094d47cbc0411717ee1ffc8fe",
-      "sha256": "4eede8246ef7a7bc57a4a05194e9593fc5f1ed0094d47cbc0411717ee1ffc8fe",
-      "adaptation": null
-    },
     {
       "source": "network/web/app.js",
       "destination": "assets/app.js",
@@ -412,8 +405,8 @@
     {
       "source": "pack/src/scene.js",
       "destination": "pack/src/scene.js",
-      "source_sha256": "66f8f61d068cc4fe636b4d8b7bc4c46278665daf16b84af5604adc9a2d997ecb",
-      "sha256": "66f8f61d068cc4fe636b4d8b7bc4c46278665daf16b84af5604adc9a2d997ecb",
+      "source_sha256": "ca43be6eceb61b8201534836c0dbaa47c52d52bf555ae72cc93f2f5079c5cf07",
+      "sha256": "ca43be6eceb61b8201534836c0dbaa47c52d52bf555ae72cc93f2f5079c5cf07",
       "adaptation": null
     },
     {
@@ -428,6 +421,13 @@
       "destination": "pack/src/simple15.js",
       "source_sha256": "2a5e3388da0737a80982bdfbb9b162653821bcb46930cb619b4f42d65a2f763f",
       "sha256": "2a5e3388da0737a80982bdfbb9b162653821bcb46930cb619b4f42d65a2f763f",
+      "adaptation": null
+    },
+    {
+      "source": "pack/src/tractor-body20.js",
+      "destination": "pack/src/tractor-body20.js",
+      "source_sha256": "4eede8246ef7a7bc57a4a05194e9593fc5f1ed0094d47cbc0411717ee1ffc8fe",
+      "sha256": "4eede8246ef7a7bc57a4a05194e9593fc5f1ed0094d47cbc0411717ee1ffc8fe",
       "adaptation": null
     },
     {
