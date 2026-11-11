@@ -1,0 +1,26 @@
+const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),assert=require('node:assert/strict'),zlib=require('node:zlib');
+const THREE=require('../vendor/three.min.js'),frames=[];
+const context=vm.createContext({console,THREE,Blob,Response,DecompressionStream,atob,performance:{now:()=>0},matchMedia:()=>({matches:false}),requestAnimationFrame:fn=>(frames.push(fn),frames.length),cancelAnimationFrame:()=>{},document:{documentElement:{dataset:{}},createElement:()=>({width:0,height:0,getContext:()=>({measureText:s=>({width:String(s).length*20}),fillText:()=>{}})})}});
+for(const file of ['i18n.js','models.js','vehicle-layout.js','cargo-geometry.js','scene.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../src',file),'utf8'),context,{filename:file});
+const result=vm.runInContext(`(()=>{
+ _scene=new THREE.Scene();_vehGroup=new THREE.Group();_cargoGroup=new THREE.Group();_labelGroup=new THREE.Group();_cgGroup=new THREE.Group();_scene.add(_vehGroup,_cargoGroup,_labelGroup,_cgGroup);_orbit.target=new THREE.Vector3();_camera=new THREE.PerspectiveCamera();_renderer={render:()=>{}};
+ const container={group:'container',id:'c20',L:6000,W:2400,H:2500,maxPayload:20000};
+ const lowbed={group:'truck',id:'pdf-lowbed7',L:10650,W:2500,H:4000,maxPayload:60000,trailer:{loadingHeight:600}};
+ const vehicles=[container,lowbed];sceneBuild(container,0,vehicles);
+ const statics=_vehGroup.children[0],records=JSON.parse(JSON.stringify(_sceneRecords20));
+ const item={name:'Ящик',weight:100,ci:0};const boxes=[0,1].map(truck=>({id:truck+1,x:0,y:0,z:0,l:500,w:500,h:500,item,zone:{type:'truck',truck,section:0}}));
+ sceneBoxes(boxes,['#337799'],null);const positions=boxes.map(boxWorld);const zones=boxes.map(b=>zoneKeyOf(b.zone));
+ const hit=zoneAt(positions[1].x,positions[1].z,boxes[1]);
+ sceneBuild(lowbed,1,vehicles);const preserved=statics===_vehGroup.children[0];
+ return {records,positions,zones,hitTruck:hit.truck,preserved,same:sameZone(boxes[0],boxes[1]),boxCount:_cargoGroup.children.filter(c=>c.isMesh).length,axles:(()=>{let n=0;_vehGroup.traverse(o=>{if(o.userData.axle)n++});return n})()};
+})()`,context);
+assert(result.records[1].minX-result.records[0].maxX>=5.99);
+assert(result.positions[1].x>result.positions[0].x+6);
+assert.notEqual(result.zones[0],result.zones[1]);assert.equal(result.same,false);assert.equal(result.hitTruck,1);assert.equal(result.boxCount,2);assert.equal(result.axles,9);assert.equal(result.preserved,true);
+assert(frames.length);frames[0](700);
+const target=vm.runInContext('_orbit.target.x',context);assert(Math.abs(target-(result.records[1].minX+result.records[1].maxX)/2)<1e-9);
+vm.runInContext('sceneOverview20()',context);const overview=vm.runInContext('_orbit.target.x',context);assert(Math.abs(overview-(result.records[0].minX+result.records[1].maxX)/2)<1e-9);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/tractor-body20.js'),'utf8'),context);
+const metadata=vm.runInContext('TRACTOR_BODY20',context),body=zlib.gunzipSync(Buffer.from(metadata.data,'base64'));
+assert.equal(body.readUInt32LE(80),36783);assert.equal(body.length,84+36783*50);assert(metadata.min[0]>40);assert(metadata.max[1]>60);
+console.log('Shared world: no vehicle overlap, exact 7+2 axles, separate cargo coordinates, camera flight, static cache and original wheel-free STL passed.');

@@ -17,7 +17,7 @@ function importFile(file, done, fail) {
           name: String(r[0] ?? ''), L: r[1], W: r[2], H: r[3],
           weight: r[4], qty: r[5] ?? 1,
           tiers: r[6] === undefined || r[6] === '' ? 1 : Math.max(1, +r[6] || 1),
-          rotatable: r[7] === undefined ? true : !!+r[7],
+          rotatable: cargoRotationAllowed(r[7]),
           group: r[8] === undefined ? '' : String(r[8]),
         }));
       }

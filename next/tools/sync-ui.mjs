@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 const next=resolve(dirname(fileURLToPath(import.meta.url)),'..'),root=resolve(next,'..'),out=resolve(next,'legacy-ui');
 const commit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
-const paths=execFileSync('git',['ls-tree','-r','--name-only','HEAD','--','network/web','pack/index.html','pack/src','pack/vendor'],{cwd:root,encoding:'utf8'}).trim().split('\n');
+const paths=execFileSync('git',['ls-files','--cached','--others','--exclude-standard','--','network/web','pack/index.html','pack/src','pack/vendor'],{cwd:root,encoding:'utf8'}).trim().split('\n');
 const files=[];
 for(const source of paths){
  const bytes=readFileSync(resolve(root,source));

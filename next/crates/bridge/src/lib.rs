@@ -96,6 +96,9 @@ impl Reply {
 #[derive(Default)]
 struct Session {
     endpoint: Option<String>,
+    remembered_endpoint: Option<String>,
+    pending_legacy: Option<Value>,
+    legacy_attempted: bool,
     token: Option<String>,
     profile: Option<Value>,
     device_id: String,
@@ -168,6 +171,7 @@ impl Bridge {
             state.token = saved.token;
             state.profile = saved.profile;
             state.device_id = saved.device_id;
+            state.remembered_endpoint = saved.endpoint;
         }
         *self.store.write().await = Some(store);
         Ok(())
@@ -185,15 +189,19 @@ impl Bridge {
                 },
                 token: s.token.clone(),
                 profile: s.profile.clone(),
+                endpoint: s.endpoint.clone().or_else(|| s.remembered_endpoint.clone()),
             })?;
         }
         Ok(())
     }
     pub async fn import_session(&self, path: &std::path::Path) -> Result<(), &'static str> {
-        let saved = session_store::read_dpapi(path)?;
+        let saved = session_store::read_legacy(path)?;
+        self.import_session_value(saved).await
+    }
+    async fn import_session_value(&self, saved: Value) -> Result<(), &'static str> {
         let token = saved["token"]
             .as_str()
-            .filter(|s| s.len() <= 256)
+            .filter(|s| !s.is_empty() && s.len() <= 256)
             .ok_or("Сеанс входа не найден")?;
         let endpoint = self
             .session
@@ -209,13 +217,18 @@ impl Bridge {
             .send()
             .await
             .map_err(|_| "Хост не подтвердил сеанс")?;
-        if !response.status().is_success() {
+        if !response.status().is_success()
+            || response.content_length().is_some_and(|n| n > 64 * 1024)
+        {
             return Err("Сохранённый вход больше не действует");
         }
         let value: Value = response
             .json()
             .await
             .map_err(|_| "Некорректный ответ хоста")?;
+        if !value["employee"].is_object() {
+            return Err("Хост не подтвердил профиль сотрудника");
+        }
         {
             let mut s = self.session.write().await;
             s.token = Some(token.into());
@@ -227,16 +240,63 @@ impl Bridge {
         }
         self.save_session().await
     }
+    pub async fn has_session(&self) -> bool {
+        self.session.read().await.token.is_some()
+    }
+    /// Prepare the legacy address without authorizing a cached token/profile.
+    /// Trust is checked afresh when discovery reconnects to the address.
+    pub async fn prepare_legacy_session(&self) {
+        if self.has_session().await {
+            return;
+        }
+        let Some(path) = session_store::legacy_session_path(&self.trust.host_id) else {
+            return;
+        };
+        if !path.is_file() {
+            return;
+        }
+        let Ok(saved) = session_store::read_legacy(&path) else {
+            return;
+        };
+        let hint = saved["active_host_url"]
+            .as_str()
+            .or_else(|| saved["host_url"].as_str())
+            .filter(|v| valid_endpoint(v))
+            .map(str::to_owned);
+        let mut session = self.session.write().await;
+        if session.token.is_none() {
+            if session.remembered_endpoint.is_none() {
+                session.remembered_endpoint = hint;
+            }
+            session.pending_legacy = Some(saved);
+        }
+    }
+    pub async fn reconnect_saved(&self) -> Result<(), &'static str> {
+        let endpoint = self.session.read().await.remembered_endpoint.clone();
+        if let Some(endpoint) = endpoint {
+            self.connect(&endpoint).await
+        } else {
+            Err("Сохранённый адрес хоста не найден")
+        }
+    }
+    async fn restore_legacy_if_needed(&self) {
+        if self.has_session().await {
+            return;
+        }
+        let pending = {
+            let mut session = self.session.write().await;
+            if session.legacy_attempted {
+                return;
+            }
+            session.legacy_attempted = true;
+            session.pending_legacy.take()
+        };
+        if let Some(pending) = pending {
+            let _ = self.import_session_value(pending).await;
+        }
+    }
     pub async fn connect(&self, endpoint: &str) -> Result<(), &'static str> {
-        let url = url::Url::parse(endpoint).map_err(|_| "Некорректный адрес хоста")?;
-        if url.scheme() != "https"
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.path() != "/"
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
+        if !valid_endpoint(endpoint) {
             return Err("Требуется защищённый адрес хоста");
         }
         let endpoint = endpoint.trim_end_matches('/');
@@ -257,7 +317,12 @@ impl Bridge {
         if health["host_id"].as_str() != Some(&self.trust.host_id) {
             return Err("Это другой хост");
         }
-        self.session.write().await.endpoint = Some(endpoint.into());
+        {
+            let mut state = self.session.write().await;
+            state.endpoint = Some(endpoint.into());
+            state.remembered_endpoint = Some(endpoint.into());
+        }
+        self.save_session().await?;
         Ok(())
     }
     pub async fn request(&self, path: &str, method: &str, body: Option<String>) -> Reply {
@@ -405,6 +470,7 @@ impl Bridge {
         loop {
             let active = self.session.read().await.endpoint.clone();
             if let Some(endpoint) = active {
+                self.restore_legacy_if_needed().await;
                 if self.connect(&endpoint).await.is_err() {
                     let mut current = self.session.write().await;
                     if current.endpoint.as_deref() == Some(&endpoint) {
@@ -412,6 +478,9 @@ impl Bridge {
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+            if self.reconnect_saved().await.is_ok() {
                 continue;
             }
             let _ = self.connect("https://127.0.0.1:8743").await;
@@ -444,6 +513,21 @@ impl Bridge {
             tokio::time::sleep(Duration::from_secs(12)).await;
         }
     }
+}
+pub fn valid_endpoint(endpoint: &str) -> bool {
+    endpoint.len() <= 2048
+        && !endpoint
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+        && url::Url::parse(endpoint).is_ok_and(|url| {
+            url.scheme() == "https"
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.path() == "/"
+                && url.query().is_none()
+                && url.fragment().is_none()
+        })
 }
 pub fn valid_path(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or("");

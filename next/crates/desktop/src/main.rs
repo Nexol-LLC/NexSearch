@@ -109,8 +109,12 @@ fn main() {
                 .join("session.sec");
             tauri::async_runtime::block_on(async {
                 let _ = bridge.configure_store(store).await;
+                if config.is_none() {
+                    bridge.prepare_legacy_session().await;
+                }
                 if let Some(config) = &config
                     && bridge.connect(&config.endpoint).await.is_ok()
+                    && !bridge.has_session().await
                     && let Some(path) = &config.import_session
                 {
                     let _ = bridge.import_session(path).await;

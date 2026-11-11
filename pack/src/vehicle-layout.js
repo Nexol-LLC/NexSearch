@@ -49,4 +49,18 @@ function sectionAxleLayout(s){
  });
  return {kind:semi?'semitrailer':'rigid',axles,groundY,source,modules,trailerCount:trailer.length,tractorCount:tractor.length,schematic:!!drawing?.schematic};
 }
-if(typeof module!=='undefined')module.exports={TRAILER_AXLE_LAYOUTS,trailerDrawingLayout,sectionAxleLayout};
+// Render positions only. Cargo and axle calculations keep their local mm axes.
+function projectSceneLayout(vehicles){
+ let end=0;return vehicles.map((vehicle,truck)=>{
+  let cursor=0,minX=0,maxX=0,H=0,W=0;const sections=getSections(vehicle).map(section=>{
+   const localX=cursor,layout=vehicle.group==='truck'?sectionAxleLayout(section):null;
+   minX=Math.min(minX,localX+(layout?Math.min(...layout.axles.map(a=>a.x/1000-a.radius/1000),0):0));
+   if(layout){const front=layout.axles.find(a=>a.kind==='tractor-front'||a.kind==='rigid-front');if(front)minX=Math.min(minX,localX+front.x/1000-1.7)}
+   maxX=Math.max(maxX,localX+section.L/1000,...(layout?[...layout.axles.map(a=>localX+(a.x+a.radius)/1000),...layout.modules.map(m=>localX+(m.x+m.l)/1000)]:[]));
+   H=Math.max(H,section.H/1000);W=Math.max(W,section.W/1000);cursor+=section.L/1000+.6;return {...section,sceneLocalX:localX};
+  });
+  const x=truck?end+6-minX:0;end=x+maxX;
+  return {truck,x,minX:x+minX,maxX:x+maxX,maxY:H,minY:Math.min(-1.5,...sections.map(s=>-(s.trailer?.loadingHeight||1250)/1000-.9)),W,sections};
+ });
+}
+if(typeof module!=='undefined')module.exports={TRAILER_AXLE_LAYOUTS,trailerDrawingLayout,sectionAxleLayout,projectSceneLayout};

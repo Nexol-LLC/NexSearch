@@ -1,13 +1,20 @@
 {
   "baseline_version": "1.6.7",
-  "reference_commit": "60c38682228973a0cc4fcc0b6fd7de77653599b3",
+  "reference_commit": "134abc6c0498b9d1a16597c5a80f3d5fc7931978",
   "source": "current working tree; confirmed mail fixes included",
   "files": [
     {
+      "source": "pack/src/tractor-body20.js",
+      "destination": "pack/src/tractor-body20.js",
+      "source_sha256": "4eede8246ef7a7bc57a4a05194e9593fc5f1ed0094d47cbc0411717ee1ffc8fe",
+      "sha256": "4eede8246ef7a7bc57a4a05194e9593fc5f1ed0094d47cbc0411717ee1ffc8fe",
+      "adaptation": null
+    },
+    {
       "source": "network/web/app.js",
       "destination": "assets/app.js",
-      "source_sha256": "f0286a8eb4fae89c4a1ad72e82260393ff3d778af9f01a62121b559b7c572b08",
-      "sha256": "f0286a8eb4fae89c4a1ad72e82260393ff3d778af9f01a62121b559b7c572b08",
+      "source_sha256": "9a4c635e647b034e8af904f52a28bac66dd1a87677dbb8e7d714527a4af882e1",
+      "sha256": "9a4c635e647b034e8af904f52a28bac66dd1a87677dbb8e7d714527a4af882e1",
       "adaptation": null
     },
     {
@@ -209,8 +216,8 @@
     {
       "source": "network/web/workspace151.js",
       "destination": "assets/workspace151.js",
-      "source_sha256": "1e7234dbe7ae1264a637f1558c2980d230b7efdda234113bd8ebb0b2cc076e4f",
-      "sha256": "1e7234dbe7ae1264a637f1558c2980d230b7efdda234113bd8ebb0b2cc076e4f",
+      "source_sha256": "3bde6563869e2c2cb9108b34986035604e70ef2f911bc3675400cd4648c1fdb1",
+      "sha256": "3bde6563869e2c2cb9108b34986035604e70ef2f911bc3675400cd4648c1fdb1",
       "adaptation": null
     },
     {
@@ -244,15 +251,15 @@
     {
       "source": "network/web/workspace165.css",
       "destination": "assets/workspace165.css",
-      "source_sha256": "6c05ea41c2cc1a8020295aabe6997cf92acb19ba69595dd6d5963235baf90664",
-      "sha256": "6c05ea41c2cc1a8020295aabe6997cf92acb19ba69595dd6d5963235baf90664",
+      "source_sha256": "970e886a85a914112f1754e08adec970ac7966ab6776f2933ebdd5baf3151a29",
+      "sha256": "970e886a85a914112f1754e08adec970ac7966ab6776f2933ebdd5baf3151a29",
       "adaptation": null
     },
     {
       "source": "network/web/workspace165.js",
       "destination": "assets/workspace165.js",
-      "source_sha256": "5b37a9685383c357cd26b432b0a6432a4e869dbc00a141685722ac1d1289ade1",
-      "sha256": "5b37a9685383c357cd26b432b0a6432a4e869dbc00a141685722ac1d1289ade1",
+      "source_sha256": "4bae6580fef21189282025c9ff49988424561646c2442ee988b482247279c9ad",
+      "sha256": "4bae6580fef21189282025c9ff49988424561646c2442ee988b482247279c9ad",
       "adaptation": null
     },
     {
@@ -272,8 +279,8 @@
     {
       "source": "pack/index.html",
       "destination": "pack/index.html",
-      "source_sha256": "8cb2297b55fc14b60577abcb4b25174a20ffcbfc6fe3bbeb7d5a0431007d3bde",
-      "sha256": "8cb2297b55fc14b60577abcb4b25174a20ffcbfc6fe3bbeb7d5a0431007d3bde",
+      "source_sha256": "9d3ce6a3705d32a892d5cfd68e3d92c8b3fd15a335d0a55802bf3e26fe89b2c7",
+      "sha256": "9d3ce6a3705d32a892d5cfd68e3d92c8b3fd15a335d0a55802bf3e26fe89b2c7",
       "adaptation": null
     },
     {
@@ -286,8 +293,8 @@
     {
       "source": "pack/src/app.js",
       "destination": "pack/src/app.js",
-      "source_sha256": "b946a6d6c8ada8d8c7efcb4c084daef3c84747aa5871b2eb64825c76383597ca",
-      "sha256": "b946a6d6c8ada8d8c7efcb4c084daef3c84747aa5871b2eb64825c76383597ca",
+      "source_sha256": "b823f224ab48e584acead734eaec27c592829e16e2d601df7b24c76bd631bd3b",
+      "sha256": "b823f224ab48e584acead734eaec27c592829e16e2d601df7b24c76bd631bd3b",
       "adaptation": null
     },
     {
@@ -321,8 +328,8 @@
     {
       "source": "pack/src/controls14.js",
       "destination": "pack/src/controls14.js",
-      "source_sha256": "6377d18bd414fc3edcbd7bb7b0d44f34ef83c9a341482399f6106a0df1b6521e",
-      "sha256": "6377d18bd414fc3edcbd7bb7b0d44f34ef83c9a341482399f6106a0df1b6521e",
+      "source_sha256": "3c4c8ca3d13af59a62e560d013441078c239b419db9f25cd711909f475a5d5eb",
+      "sha256": "3c4c8ca3d13af59a62e560d013441078c239b419db9f25cd711909f475a5d5eb",
       "adaptation": null
     },
     {
@@ -335,8 +342,8 @@
     {
       "source": "pack/src/io.js",
       "destination": "pack/src/io.js",
-      "source_sha256": "d253e3391949448351cf1ed1503b442eb1cf6d64fa999656bd2d3c5c8ef68b10",
-      "sha256": "d253e3391949448351cf1ed1503b442eb1cf6d64fa999656bd2d3c5c8ef68b10",
+      "source_sha256": "a362c87fff791244b377cb4b62bb63f1664fb5cd8f416d56b6ad705b533fbfe5",
+      "sha256": "a362c87fff791244b377cb4b62bb63f1664fb5cd8f416d56b6ad705b533fbfe5",
       "adaptation": null
     },
     {
@@ -349,15 +356,15 @@
     {
       "source": "pack/src/models.js",
       "destination": "pack/src/models.js",
-      "source_sha256": "7b8efa52a39701301456270913a5f4f41ed4f615efbc86bc44ab1ab6add24468",
-      "sha256": "7b8efa52a39701301456270913a5f4f41ed4f615efbc86bc44ab1ab6add24468",
+      "source_sha256": "a6a80f8303bf423a2aa4b0d1141c8ce67194d0cfb430a08bf25bc41759fdc7a5",
+      "sha256": "a6a80f8303bf423a2aa4b0d1141c8ce67194d0cfb430a08bf25bc41759fdc7a5",
       "adaptation": null
     },
     {
       "source": "pack/src/network-plans.js",
       "destination": "pack/src/network-plans.js",
-      "source_sha256": "f72279b6f0eada244e66a85bec5b68707a1dfdc195953e5da5ab2d4a7da6df68",
-      "sha256": "f72279b6f0eada244e66a85bec5b68707a1dfdc195953e5da5ab2d4a7da6df68",
+      "source_sha256": "8a930adfa990b0cfd11ff3bcafdc28e0221113acd9be6f6802789e1e298cd1e6",
+      "sha256": "8a930adfa990b0cfd11ff3bcafdc28e0221113acd9be6f6802789e1e298cd1e6",
       "adaptation": null
     },
     {
@@ -405,22 +412,22 @@
     {
       "source": "pack/src/scene.js",
       "destination": "pack/src/scene.js",
-      "source_sha256": "9487847a3841c078f90181d3794ca3d9fd18d709b8465b73d60537e47ec818d2",
-      "sha256": "9487847a3841c078f90181d3794ca3d9fd18d709b8465b73d60537e47ec818d2",
+      "source_sha256": "66f8f61d068cc4fe636b4d8b7bc4c46278665daf16b84af5604adc9a2d997ecb",
+      "sha256": "66f8f61d068cc4fe636b4d8b7bc4c46278665daf16b84af5604adc9a2d997ecb",
       "adaptation": null
     },
     {
       "source": "pack/src/simple15.css",
       "destination": "pack/src/simple15.css",
-      "source_sha256": "1fe5256fdf560e355561b43556ec83c8c08d13b12b0ba4bab21a222081d81490",
-      "sha256": "1fe5256fdf560e355561b43556ec83c8c08d13b12b0ba4bab21a222081d81490",
+      "source_sha256": "ad2f2a121ffdc78d65836a7780e88f8b2f692b5516a429624792ee40faf7019b",
+      "sha256": "ad2f2a121ffdc78d65836a7780e88f8b2f692b5516a429624792ee40faf7019b",
       "adaptation": null
     },
     {
       "source": "pack/src/simple15.js",
       "destination": "pack/src/simple15.js",
-      "source_sha256": "8d2b466df7eb2f037af628cc8030b215dd852bbd73a2dbb1c041fa92acef9b4b",
-      "sha256": "8d2b466df7eb2f037af628cc8030b215dd852bbd73a2dbb1c041fa92acef9b4b",
+      "source_sha256": "2a5e3388da0737a80982bdfbb9b162653821bcb46930cb619b4f42d65a2f763f",
+      "sha256": "2a5e3388da0737a80982bdfbb9b162653821bcb46930cb619b4f42d65a2f763f",
       "adaptation": null
     },
     {
@@ -440,8 +447,8 @@
     {
       "source": "pack/src/vehicle-layout.js",
       "destination": "pack/src/vehicle-layout.js",
-      "source_sha256": "43ece415950562c997dc629f813ba490368a198534aa783d9acdf48310d5c495",
-      "sha256": "43ece415950562c997dc629f813ba490368a198534aa783d9acdf48310d5c495",
+      "source_sha256": "c826c9119e2db72fc5512da39c7c340f13d614099f9b63f8f81eb91724c37a66",
+      "sha256": "c826c9119e2db72fc5512da39c7c340f13d614099f9b63f8f81eb91724c37a66",
       "adaptation": null
     },
     {

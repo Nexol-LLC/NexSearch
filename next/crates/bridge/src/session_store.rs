@@ -10,6 +10,8 @@ pub struct SavedSession {
     pub device_id: String,
     pub token: Option<String>,
     pub profile: Option<Value>,
+    #[serde(default)]
+    pub endpoint: Option<String>,
 }
 pub struct SessionStore {
     path: PathBuf,
@@ -94,6 +96,85 @@ pub fn read_dpapi(path: &Path) -> Result<Value, &'static str> {
         Err("Импорт сеанса Windows доступен только на Windows")
     }
 }
+/// Read only the protected 1.6.7 format for the current operating-system user.
+/// The token is never trusted until the pinned host confirms `/api/me`.
+pub fn read_legacy(path: &Path) -> Result<Value, &'static str> {
+    #[cfg(windows)]
+    {
+        read_dpapi(path)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use aes_gcm::{
+            Aes256Gcm, Nonce,
+            aead::{Aead, KeyInit, Payload},
+        };
+        let bytes = std::fs::read(path).map_err(|_| "Сохранённый вход недоступен")?;
+        if bytes.len() > 1024 * 1024 || bytes.len() < 34 || !bytes.starts_with(b"MACKC1") {
+            return Err("Неподдерживаемый защищённый сеанс macOS");
+        }
+        let uid = std::process::Command::new("/usr/bin/id")
+            .arg("-u")
+            .output()
+            .map_err(|_| "Пользователь macOS не определён")?;
+        let uid = std::str::from_utf8(&uid.stdout)
+            .map_err(|_| "Пользователь macOS не определён")?
+            .trim();
+        if uid.is_empty() || uid.len() > 10 || !uid.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("Пользователь macOS не определён");
+        }
+        let key = keyring::Entry::new("com.nexsearch.local-storage.v1", uid)
+            .map_err(|_| "Связка ключей macOS недоступна")?
+            .get_secret()
+            .map_err(|_| "Исходный ключ входа недоступен в связке macOS")?;
+        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| "Повреждён ключ входа macOS")?;
+        let plain = cipher
+            .decrypt(
+                Nonce::from_slice(&bytes[6..18]),
+                Payload {
+                    msg: &bytes[18..],
+                    aad: b"NexSearch local storage v1",
+                },
+            )
+            .map_err(|_| "Сеанс принадлежит другому пользователю или повреждён")?;
+        serde_json::from_slice(&plain).map_err(|_| "Повреждён защищённый сеанс")
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let _ = path;
+        Err("Автоматический перенос входа поддерживается на Windows и macOS")
+    }
+}
+pub fn legacy_session_path(host_id: &str) -> Option<PathBuf> {
+    // A malformed id must not let a profile escape its application directory.
+    let host_id = uuid::Uuid::parse_str(host_id).ok()?.to_string();
+    if let Some(home) = std::env::var_os("NEXOL_HOME") {
+        return Some(PathBuf::from(home).join("employee.sec"));
+    }
+    #[cfg(windows)]
+    {
+        Some(
+            PathBuf::from(std::env::var_os("APPDATA")?)
+                .join("Nexol")
+                .join(host_id)
+                .join("employee.sec"),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Some(
+            PathBuf::from(std::env::var_os("HOME")?)
+                .join("Library/Application Support/NexSearch/Employees")
+                .join(host_id)
+                .join("employee.sec"),
+        )
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let _ = host_id;
+        None
+    }
+}
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -108,6 +189,7 @@ mod tests {
             device_id: "device".into(),
             token: Some("private-local-test-token".into()),
             profile: None,
+            endpoint: Some("https://127.0.0.1:8743".into()),
         };
         store.save(&value).unwrap();
         assert_eq!(store.load().unwrap().unwrap().token, value.token);

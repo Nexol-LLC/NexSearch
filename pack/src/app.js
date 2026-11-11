@@ -30,6 +30,7 @@ function init() {
     onDrop: onBoxDrop,
     onCgMove:onCgMove,
     truckIdx: () => project.cur,
+    onActivateTruck:index=>switchTruck(index),
   });
   project.trucks.push({ vehicle: vehicleById('tent82') });
   $('vehSel').value='tent82';
@@ -253,6 +254,7 @@ function removeSpace() {
 function switchTruck(i) {
   if (i < 0 || i >= project.trucks.length) return;
   project.cur = i;
+  selectBox(null);
   refreshAll();
 }
 
@@ -275,7 +277,7 @@ function addCargoRow(data) {
     <td><input class="c-wt num noarrow" type="number" value="${data.weight != null ? data.weight : ''}"></td>
     <td><input class="c-q num" type="number" value="${data.qty != null ? data.qty : 1}" min="0"></td>
     <td><input class="c-tiers tiers" type="number" value="${data.tiers || 1}" min="1" max="100"></td>
-    <td><input class="c-rot" type="checkbox" ${data.rotatable === false ? '' : 'checked'}></td>
+    <td><input class="c-rot" type="checkbox" aria-label="Разрешить поворот на полу вокруг оси Z" ${cargoRotationAllowed(data.rotatable) ? 'checked' : ''}></td>
     <td><input class="c-grp" value="${escapeHtml(data.group || '')}"></td>
     <td><button class="del" title="${t('delRow')}">×</button></td>`;
   tr.querySelector('.del').onclick = () => tr.remove();
@@ -538,6 +540,7 @@ function onBoxDrop(b) {
   b.z = Math.max(tops.length?Math.max(...tops):0,floor??0);
   if (boxCollides(b)) b.z = save;
   b.pinned = true;
+  if(b.zone.type==='truck')project.cur=b.zone.truck;
   refreshAll();
 }
 
@@ -581,8 +584,7 @@ function validate() {
 /* ---------- Отрисовка и статистика ---------- */
 
 function visibleBoxes() {
-  return project.boxes.filter(b => b.zone.type === 'wh' ||
-    (b.zone.type === 'truck' && b.zone.truck === project.cur));
+  return project.boxes;
 }
 
 let _noSpaceDismissed = false; // «Начать» нажата — сообщение не показываем
@@ -606,7 +608,7 @@ function refreshAll() {
     `${t('space')} ${project.cur + 1}/${project.trucks.length}: ${truckName(tr)}`;
   $('navPrev').disabled = project.cur === 0;
   $('navNext').disabled = project.cur === project.trucks.length - 1;
-  sceneBuild(tr.vehicle, project.cur);
+  sceneBuild(tr.vehicle, project.cur,project.trucks.map(t=>t.vehicle));
   sceneBoxes(visibleBoxes(), CARGO_COLORS, sceneSelectedId());
   onBoxSelect(sceneSelectedId());
   showStats();

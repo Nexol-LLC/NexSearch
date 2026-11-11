@@ -50,7 +50,7 @@ async fn fixture() -> (String, Trust, Arc<AtomicUsize>, tokio::task::JoinHandle<
                 let request = String::from_utf8_lossy(&buffer);
                 let body=if request.starts_with("GET /api/host-info "){json!({"host_id":"fixture-host"})}
                 else if request.starts_with("POST /api/auth/login "){json!({"token":"fixture-session-secret","employee":{"id":"employee","login":"fixture"}})}
-                else {json!({"authenticated":request.to_ascii_lowercase().contains("authorization: bearer fixture-session-secret")})}.to_string();
+                else {json!({"employee":{"id":"employee","login":"fixture"},"authenticated":request.to_ascii_lowercase().contains("authorization: bearer fixture-session-secret")})}.to_string();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -99,5 +99,63 @@ async fn verified_host_keeps_session_secret_in_rust_only() {
     let value: Value = serde_json::from_slice(&STANDARD.decode(reply.body).unwrap()).unwrap();
     assert_eq!(value["authenticated"], true);
     assert_eq!(count.load(Ordering::SeqCst), 3);
+    server.abort();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn native_restart_restores_protected_login_and_checks_host_again() {
+    let (endpoint, trust, count, server) = fixture().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session.sec");
+    let bridge = Bridge::new(trust.clone()).unwrap();
+    bridge.configure_store(path.clone()).await.unwrap();
+    bridge.connect(&endpoint).await.unwrap();
+    assert_eq!(
+        bridge
+            .request(
+                "/api/auth/login",
+                "POST",
+                Some(json!({"login":"fixture","password":"test-only"}).to_string())
+            )
+            .await
+            .status,
+        200
+    );
+    drop(bridge);
+    let resumed = Bridge::new(trust).unwrap();
+    resumed.configure_store(path.clone()).await.unwrap();
+    assert!(resumed.has_session().await);
+    resumed.reconnect_saved().await.unwrap();
+    let reply = resumed.request("/api/me", "GET", None).await;
+    let visible = STANDARD.decode(reply.body).unwrap();
+    let value: Value = serde_json::from_slice(&visible).unwrap();
+    assert_eq!(value["authenticated"], true);
+    assert_eq!(count.load(Ordering::SeqCst), 4);
+    assert!(
+        !String::from_utf8_lossy(&std::fs::read(path).unwrap()).contains("fixture-session-secret")
+    );
+    server.abort();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn legacy_employee_login_import_requires_the_pinned_host_confirmation() {
+    let (endpoint, trust, _, server) = fixture().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("employee.sec");
+    let raw=json!({"token":"fixture-session-secret","device_id":"legacy-device","profile":{"id":"unverified-cached-id"}}).to_string();
+    let encrypted =
+        windows_dpapi::encrypt_data(raw.as_bytes(), windows_dpapi::Scope::User, None).unwrap();
+    std::fs::write(&path, [b"DPAPI".as_slice(), &encrypted].concat()).unwrap();
+    let bridge = Bridge::new(trust).unwrap();
+    assert!(bridge.import_session(&path).await.is_err());
+    bridge.connect(&endpoint).await.unwrap();
+    bridge.import_session(&path).await.unwrap();
+    let connection = bridge.request("/api/connection", "GET", None).await;
+    let visible = STANDARD.decode(connection.body).unwrap();
+    let value: Value = serde_json::from_slice(&visible).unwrap();
+    assert_eq!(value["profile"]["id"], "employee");
+    assert!(!String::from_utf8_lossy(&visible).contains("fixture-session-secret"));
     server.abort();
 }

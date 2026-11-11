@@ -57,6 +57,9 @@ const CARGO_GAP = 10;
 
 /* Грузовое место (одна позиция = qty одинаковых мест).
    tiers — ярусность: 1 = не штабелируется, 2 = в 2 яруса, 3 = в 3 и т.д. */
+function cargoRotationAllowed(value) {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
 function makeCargoItem(o) {
   let tiers = Math.floor(+o.tiers);
   if (!tiers || tiers < 1) {
@@ -72,7 +75,7 @@ function makeCargoItem(o) {
     tiers,
     stackable: tiers > 1,           // производное, для внутренних проверок
     maxLoad: o.maxLoad === '' || o.maxLoad == null ? Infinity : +o.maxLoad,
-    rotatable: o.rotatable !== false && o.rotatable !== 'false' && o.rotatable !== 0,
+    rotatable: cargoRotationAllowed(o.rotatable),
     color: o.color || null,
   };
 }
@@ -88,5 +91,5 @@ function getSections(v) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { VEHICLE_TEMPLATES, CARGO_PRESETS, CARGO_COLORS, CARGO_GAP, makeCargoItem, vehicleById, getSections };
+  module.exports = { VEHICLE_TEMPLATES, CARGO_PRESETS, CARGO_COLORS, CARGO_GAP, makeCargoItem, cargoRotationAllowed, vehicleById, getSections };
 }
