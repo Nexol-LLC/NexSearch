@@ -45,41 +45,43 @@ window.addEventListener('DOMContentLoaded',()=>{
 });
 
 sceneSetAxleLoads=loadsBySec=>{
- for(const child of [..._labelGroup.children]){child.traverse(o=>{o.material?.map?.dispose();o.material?.dispose()});_labelGroup.remove(child)}
+ const groups=new Map(),rows=[],size=Math.max(.38,(_vehicleBounds.maxX-_vehicleBounds.minX+3)/Math.max(1,_canvasEl.clientWidth)*18);
+ for(const box of project.boxes){if(box.zone.type!=='truck')continue;const key=box.zone.truck+':'+box.zone.section;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({...box,weight:box.item.weight})}
  for(const zone of _zones.filter(z=>z.kind==='sec')){
   const section=zone.idx,vehicle=project.trucks[zone.truck]?.vehicle;if(!vehicle)continue;
-  const ownStats=computeStats(zone.section,project.boxes.filter(b=>b.zone.type==='truck'&&b.zone.truck===zone.truck&&b.zone.section===section).map(b=>({...b,weight:b.item.weight})));
-  const value=zone.truck===project.cur&&loadsBySec?.[section]?loadsBySec[section]:grossAxleLoads(zone.section,ownStats);
+  const value=zone.truck===project.cur&&loadsBySec?.[section]?loadsBySec[section]:grossAxleLoads(zone.section,computeStats(zone.section,groups.get(zone.truck+':'+section)||[]));
   const layout=zone.axleLayout;if(!layout)continue;
   for(const axis of layout.axles){
    const calculated=value.available?value.axles.find(a=>a.kind===axis.kind&&a.id===axis.id):null;
    const load=calculated?(calculated.kg/1000).toFixed(2)+' т':'—';
    const color=calculated?.over||calculated?.unstable?'#b9465d':calculated?'#426d5c':'#67768b';
-   const size=Math.max(.38,(_vehicleBounds.maxX-_vehicleBounds.minX+3)/Math.max(1,_canvasEl.clientWidth)*18);
-   const label=new THREE.Group(),code=makeTextSprite(axis.code,color,size);label.add(code);const text=makeTextSprite(load,color,size*1.1);
    const nearest=Math.min(...layout.axles.filter(a=>a!==axis&&a.kind===axis.kind).map(a=>Math.abs(a.x-axis.x)/1000),1.5);
-   text.scale.x=Math.min(text.scale.x,nearest*.88);text.position.y=-size;label.add(text);
-   label.position.set(zone.x0+axis.x/1000,layout.groundY/1000-.28,-.28);
-   label.traverse(o=>{if(o.material)o.material.depthTest=false;o.renderOrder=1001});label.userData={axleCode:axis.code,axisId:axis.id};_labelGroup.add(label);
+   rows.push({code:axis.code,id:axis.id,truck:zone.truck,load,color,nearest,x:zone.x0+axis.x/1000,y:layout.groundY/1000-.28,z:zone.z0-.28});
   }
+ }
+ const key=JSON.stringify([size,rows]);if(key===_axleLabelKey20)return;_axleLabelKey20=key;disposeSceneTree20(_labelGroup);
+ for(const row of rows){
+   const {code:axisCode,load,color,nearest,x,y,z}=row,label=new THREE.Group(),code=makeTextSprite(axisCode,color,size);label.add(code);const text=makeTextSprite(load,color,size*1.1);
+   text.scale.x=Math.min(text.scale.x,nearest*.88);text.position.y=-size;label.add(text);
+   label.position.set(x,y,z);
+   label.traverse(o=>{if(o.material)o.material.depthTest=false;o.renderOrder=1001});label.userData={axleCode:axisCode,axisId:row.id,truck:row.truck};_labelGroup.add(label);
  }
  sceneRender();
 };
 const renderPerspective14=sceneRender;
 let cameraMode14='3d',perspective14=null;
-function sceneView14(mode){if(!perspective14)perspective14=_camera;cameraMode14=mode;if(mode==='3d')_camera=perspective14;else{const aspect=_canvasEl.clientWidth/_canvasEl.clientHeight,span=Math.max(8,_orbit.dist*.6);_camera=new THREE.OrthographicCamera(-span*aspect/2,span*aspect/2,span/2,-span/2,.05,500)};for(const name of ['3d','top','side'])$('view-'+name)?.classList.toggle('active',name===mode);sceneRender()}
+function sceneView14(mode){stopCameraFlight20();if(!perspective14)perspective14=_camera;cameraMode14=mode;if(mode==='3d')_camera=perspective14;else{const aspect=_canvasEl.clientWidth/_canvasEl.clientHeight,span=Math.max(8,_orbit.dist*.6);_camera=new THREE.OrthographicCamera(-span*aspect/2,span*aspect/2,span/2,-span/2,.05,500)};for(const name of ['3d','top','side'])$('view-'+name)?.classList.toggle('active',name===mode);_orbit.dist=fitBoundsDistance20(_vehicleBounds,_orbit.target);sceneRender()}
 sceneRender=()=>{
  if(cameraMode14==='3d'){renderPerspective14();return}
- const t=_orbit.target,b=_vehicleBounds,d=Math.max(20,_orbit.dist),aspect=_canvasEl.clientWidth/_canvasEl.clientHeight;
- let span=Math.max((b.maxX-b.minX+3)/aspect,b.maxY-b.minY+2);
+ const t=_orbit.target,d=Math.max(20,_orbit.dist),aspect=_canvasEl.clientWidth/_canvasEl.clientHeight;
+ const span=Math.max(2,_orbit.dist*2*Math.tan(Math.PI/8));
  if(cameraMode14==='top'){
   _camera.position.set(t.x,d,t.z);_camera.up.set(0,0,-1);
-  span=Math.max(span,b.W+2*(WH_GAP+WH_DEPTH/1000)+1);
   _camera.lookAt(t);
  }else{
-  const midY=(b.minY+b.maxY)/2;
+  const midY=t.y;
   _camera.position.set(t.x,midY,t.z+d);_camera.up.set(0,1,0);_camera.lookAt(new THREE.Vector3(t.x,midY,t.z));
  }
  _camera.left=-span*aspect/2;_camera.right=span*aspect/2;_camera.top=span/2;_camera.bottom=-span/2;
- _camera.updateProjectionMatrix();_renderer.render(_scene,_camera);
+ _camera.far=Math.max(500,d*3+100);_camera.updateProjectionMatrix();_renderer.render(_scene,_camera);
 };

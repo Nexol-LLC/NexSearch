@@ -18,7 +18,7 @@ function restorePlan(input){const data=validatePlan20(input);rememberEdit();rest
  try{localStorage.setItem(cargoUnitsKey151(),JSON.stringify(cargoDisplayUnits151))}catch{}
  if(['capacity','balance','unloading'].includes(settings.packing_mode))$('packing-mode').value=settings.packing_mode;
  if(['3d','top','side'].includes(settings.view_mode))sceneView14(settings.view_mode);
- const camera=settings.camera;if(camera&&['theta','phi','dist'].every(k=>Number.isFinite(camera[k]))&&camera.dist>=2&&camera.dist<=500&&Array.isArray(camera.target)&&camera.target.length===3&&camera.target.every(v=>Number.isFinite(v)&&Math.abs(v)<1e6)){stopCameraFlight20();Object.assign(_orbit,{theta:camera.theta,phi:Math.max(.05,Math.min(Math.PI-.05,camera.phi)),dist:camera.dist});_orbit.target.set(...camera.target);sceneRender()}
+ const camera=settings.camera;if(camera&&['theta','phi','dist'].every(k=>Number.isFinite(camera[k]))&&camera.dist>=2&&camera.dist<=50000&&Array.isArray(camera.target)&&camera.target.length===3&&camera.target.every(v=>Number.isFinite(v)&&Math.abs(v)<1e6)){stopCameraFlight20();Object.assign(_orbit,{theta:camera.theta,phi:Math.max(.05,Math.min(Math.PI-.05,camera.phi)),dist:camera.dist});_orbit.target.set(...camera.target);sceneRender()}
  renderCargoCards15(true);
 }
 async function planApi(path,options={}){if(window.parent!==window&&window.parent.NexolApi)return window.parent.NexolApi(path,options);throw Error('Сохранение на хост доступно во вкладке «Погрузка» NexSearch')}

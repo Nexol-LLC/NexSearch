@@ -21,14 +21,19 @@ let _selectedId = null;
 let _api = {};             // { onSelect(id), onDrop(box), boxesVisible() }
 let _drag = null;          // {box, mesh, offX, offZ, plane}
 let _raycaster, _mouse;
-let _sceneGeometryKey20='',_sceneRecords20=[],_sceneActive20=-1,_cameraFlight20=0,_buildingWorld20=false;
-function stopCameraFlight20(){if(_cameraFlight20)cancelAnimationFrame(_cameraFlight20);_cameraFlight20=0}
+let _sceneGeometryKey20='',_sceneRecords20=[],_sceneActive20=-1,_cameraFlight20=0,_cameraFlightSerial20=0,_buildingWorld20=false,_axleLabelKey20='';
+function stopCameraFlight20(){_cameraFlightSerial20++;if(_cameraFlight20)cancelAnimationFrame(_cameraFlight20);_cameraFlight20=0}
 function fitBoundsDistance20(bounds,target){
+ const side=WH_GAP+WH_DEPTH/1000;
+ if(typeof cameraMode14!=='undefined'&&cameraMode14!=='3d'){
+  const aspect=_canvasEl.clientWidth/_canvasEl.clientHeight,depth=(bounds.maxZ??bounds.W)-(bounds.minZ??0);
+  const span=Math.max((bounds.maxX-bounds.minX+2)/aspect,cameraMode14==='top'?depth+side*2:bounds.maxY-(bounds.minY??-1.5)+2);
+  return span/(2*Math.tan(Math.PI/8))*1.12;
+ }
  const outward=new THREE.Vector3(Math.sin(_orbit.phi)*Math.cos(_orbit.theta),Math.cos(_orbit.phi),Math.sin(_orbit.phi)*Math.sin(_orbit.theta));
  const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),outward).normalize(),up=new THREE.Vector3().crossVectors(outward,right);
  const tangent=Math.tan((_camera.fov||45)*Math.PI/360),horizontal=tangent*(_camera.aspect||1),margin=1.12;let distance=2;
- const side=WH_GAP+WH_DEPTH/1000;
- for(const x of [bounds.minX,bounds.maxX])for(const y of [bounds.minY??-1.5,bounds.maxY])for(const z of [-side,bounds.W+side]){
+ for(const x of [bounds.minX,bounds.maxX])for(const y of [bounds.minY??-1.5,bounds.maxY])for(const z of [(bounds.minZ??0)-side,(bounds.maxZ??bounds.W)+side]){
   const point=new THREE.Vector3(x,y,z).sub(target),depth=point.dot(outward);
   distance=Math.max(distance,depth+margin*Math.max(Math.abs(point.dot(right))/horizontal,Math.abs(point.dot(up))/tangent));
  }
@@ -36,15 +41,19 @@ function fitBoundsDistance20(bounds,target){
 }
 function focusTruck20(index,animate=true){
  const record=_sceneRecords20[index];if(!record)return;_vehicleBounds={...record};
- const target=new THREE.Vector3((record.minX+record.maxX)/2,record.maxY/3,record.W/2),distance=fitBoundsDistance20(record,target);
- stopCameraFlight20();if(!animate||document.documentElement.dataset.motion==='reduced'||matchMedia('(prefers-reduced-motion: reduce)').matches){_orbit.target.copy(target);_orbit.dist=distance;sceneRender();return}
- const from=_orbit.target.clone(),oldDist=_orbit.dist,start=performance.now(),travel=from.distanceTo(target);
- const frame=now=>{const t=Math.min(1,(now-start)/700),ease=t*t*(3-2*t);_orbit.target.copy(from).lerp(target,ease);_orbit.target.y+=Math.sin(Math.PI*t)*Math.min(3,travel*.12);_orbit.dist=oldDist+(distance-oldDist)*ease+Math.sin(Math.PI*t)*Math.min(6,travel*.18);sceneRender();_cameraFlight20=t<1?requestAnimationFrame(frame):0};_cameraFlight20=requestAnimationFrame(frame);
+ const target=new THREE.Vector3((record.minX+record.maxX)/2,record.maxY/3,(record.minZ+record.maxZ)/2);
+ moveCamera20(target,fitBoundsDistance20(record,target),animate);
 }
-function sceneOverview20(){
- if(!_sceneRecords20.length)return;stopCameraFlight20();
- const minX=Math.min(..._sceneRecords20.map(r=>r.minX)),maxX=Math.max(..._sceneRecords20.map(r=>r.maxX)),maxY=Math.max(..._sceneRecords20.map(r=>r.maxY)),W=Math.max(..._sceneRecords20.map(r=>r.W));
- _vehicleBounds={minX,maxX,minY:Math.min(..._sceneRecords20.map(r=>r.minY)),maxY,W};_orbit.target.set((minX+maxX)/2,maxY/3,W/2);_orbit.dist=fitBoundsDistance20(_vehicleBounds,_orbit.target);sceneRender();
+function moveCamera20(target,distance,animate=true){
+ stopCameraFlight20();if(!animate||document.documentElement.dataset.motion==='reduced'||matchMedia('(prefers-reduced-motion: reduce)').matches){_orbit.target.copy(target);_orbit.dist=distance;sceneRender();return}
+ const from=_orbit.target.clone(),oldDist=_orbit.dist,start=performance.now(),serial=_cameraFlightSerial20;
+ // No artificial lift/zoom arc: one monotone move, including a change of vehicle type.
+ const frame=now=>{if(serial!==_cameraFlightSerial20)return;const t=Math.max(0,Math.min(1,(now-start)/520)),ease=t*t*t*(t*(t*6-15)+10);_orbit.target.copy(from).lerp(target,ease);_orbit.dist=oldDist+(distance-oldDist)*ease;sceneRender();_cameraFlight20=t<1?requestAnimationFrame(frame):0};_cameraFlight20=requestAnimationFrame(frame);
+}
+function sceneOverview20(animate=true){
+ if(!_sceneRecords20.length)return;
+ const minX=Math.min(..._sceneRecords20.map(r=>r.minX)),maxX=Math.max(..._sceneRecords20.map(r=>r.maxX)),maxY=Math.max(..._sceneRecords20.map(r=>r.maxY)),minZ=Math.min(..._sceneRecords20.map(r=>r.minZ)),maxZ=Math.max(..._sceneRecords20.map(r=>r.maxZ)),W=maxZ-minZ;
+ _vehicleBounds={minX,maxX,minZ,maxZ,minY:Math.min(..._sceneRecords20.map(r=>r.minY)),maxY,W};const target=new THREE.Vector3((minX+maxX)/2,maxY/3,(minZ+maxZ)/2);moveCamera20(target,fitBoundsDistance20(_vehicleBounds,target),animate);
 }
 function disposeSceneTree20(root){const textures=new Set(),materials=new Set(),geometries=new Set();root.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[]){materials.add(m);if(m.map)textures.add(m.map)}});for(const g of geometries)g.dispose();for(const t of textures)t.dispose();for(const m of materials)m.dispose();root.clear()}
 const _packedModels20=new Map();
@@ -120,7 +129,7 @@ function sceneInit(container, api) {
     orbiting = null;
   });
   window.addEventListener('mousemove', e => {
-    if(_cgDrag){const pt=planePoint(e,_cgDrag.plane);if(pt&&_api.onCgMove)_api.onCgMove(_cgDrag.zone.idx,(pt.x-_cgDrag.zone.x0)*1000,pt.z*1000);return;}
+    if(_cgDrag){const pt=planePoint(e,_cgDrag.plane);if(pt&&_api.onCgMove)_api.onCgMove(_cgDrag.zone.idx,(pt.x-_cgDrag.zone.x0)*1000,(pt.z-_cgDrag.zone.z0)*1000);return;}
     if (_drag) { moveDrag(e); return; }
     if (!orbiting) return;
     const dx = e.clientX - orbiting.x, dy = e.clientY - orbiting.y;
@@ -139,7 +148,7 @@ function sceneInit(container, api) {
   _canvasEl.addEventListener('wheel', e => {
     e.preventDefault();
     stopCameraFlight20();
-    _orbit.dist = Math.min(150, Math.max(2, _orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+    _orbit.dist = Math.min(Math.max(150,(_vehicleBounds.maxZ-_vehicleBounds.minZ||0)*3), Math.max(2, _orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
     sceneRender();
   }, { passive: false });
   _canvasEl.addEventListener('contextmenu', e => e.preventDefault());
@@ -157,6 +166,7 @@ function sceneResize(container) {
   _renderer.setSize(w, h);
   _camera.aspect = w / h;
   _camera.updateProjectionMatrix();
+  if(typeof perspective14!=='undefined'&&perspective14&&perspective14!==_camera){perspective14.aspect=w/h;perspective14.updateProjectionMatrix()}
   sceneRender();
 }
 
@@ -365,14 +375,14 @@ function addRuler(x0, L, W, isLast) {
 function sceneBuild(vehicle, truckIdx,vehicles=vehicle?[vehicle]:[]) {
   const key=JSON.stringify([LANG,vehicles]);
   if(key===_sceneGeometryKey20){if(truckIdx!==_sceneActive20){_sceneActive20=truckIdx;focusTruck20(truckIdx,true)}return;}
-  const wasReady=!!_sceneGeometryKey20,previousActive=_sceneActive20,previousTarget=_orbit.target.clone(),previousDist=_orbit.dist;
-  stopCameraFlight20();_sceneGeometryKey20=key;_sceneRecords20=projectSceneLayout(vehicles);_buildingWorld20=true;
+  const wasReady=!!_sceneGeometryKey20,previousActive=_sceneActive20,previousBounds=_sceneRecords20[truckIdx];
+  _sceneGeometryKey20=key;_sceneRecords20=projectSceneLayout(vehicles);_buildingWorld20=true;
   if(_cgGroup)disposeSceneTree20(_cgGroup);
-  disposeSceneTree20(_vehGroup);disposeSceneTree20(_labelGroup);
+  disposeSceneTree20(_vehGroup);disposeSceneTree20(_labelGroup);_axleLabelKey20='';
   _zones = [];
   _axlePos = [];
   // vehicle может быть null (все отсеки удалены) — рисуются только склады
-  const sections = _sceneRecords20.flatMap(record=>record.sections.map(s=>({...s,sceneTruck:record.truck,sceneX:record.x+s.sceneLocalX,sceneVehicle:vehicles[record.truck]})));
+  const sections = _sceneRecords20.flatMap(record=>record.sections.map(s=>({...s,sceneTruck:record.truck,sceneX:record.x+s.sceneLocalX,sceneZ:record.z,sceneVehicle:vehicles[record.truck]})));
   let offset = 0, maxW = 0, maxH = 0;
   let minX=0,maxX=0;
   const tireMat=new THREE.MeshPhongMaterial({color:0x25313d,shininess:8});
@@ -418,11 +428,12 @@ function sceneBuild(vehicle, truckIdx,vehicles=vehicle?[vehicle]:[]) {
   };
 
   for (const s of sections) {
+    const childStart=_vehGroup.children.length;
     const vehicle=s.sceneVehicle;offset=s.sceneX;
     const L = s.L / 1000, W = s.W / 1000, H = s.H / 1000;
     maxW = Math.max(maxW, W); maxH = Math.max(maxH, H);
     const bounds=loadingBounds(s);
-    _zones.push({kind:'sec',idx:s.index,truck:s.sceneTruck,x0:offset,z0:0,L:s.L,W:s.W,...bounds,section:s});
+    _zones.push({kind:'sec',idx:s.index,truck:s.sceneTruck,x0:offset,z0:s.sceneZ,L:s.L,W:s.W,...bounds,section:s});
     if(bounds.oversize){const frame=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry((bounds.maxX-bounds.minX)/1000,bounds.H/1000,(bounds.maxY-bounds.minY)/1000)),new THREE.LineBasicMaterial({color:0xc58b46,transparent:true,opacity:.5}));frame.position.set(offset+(bounds.minX+bounds.maxX)/2000,bounds.H/2000,(bounds.minY+bounds.maxY)/2000);_vehGroup.add(frame)}
 
     for(const deck of floorSegments(s)){
@@ -472,19 +483,21 @@ function sceneBuild(vehicle, truckIdx,vehicles=vehicle?[vehicle]:[]) {
     }
     // ворота сзади секции; у последней правая створка приоткрыта;
     // у бортового кузова — единый борт, откинутый вниз
-    const isLast = s === sections[sections.length - 1];
+    const isLast = s.index===_sceneRecords20[s.sceneTruck].sections.at(-1).index;
     if(!s.trailer)addDoors(offset + L, W, H, isLast, vehicle.body === 'flatbed');
     // линейка размеров кузова
     addRuler(offset, L, W, isLast);
-
+    const lane=new THREE.Group();lane.name='vehicle-section:'+s.sceneTruck+':'+s.index;lane.position.z=s.sceneZ;lane.userData={truck:s.sceneTruck,section:s.index};
+    for(const child of _vehGroup.children.slice(childStart))lane.add(child);_vehGroup.add(lane);
     offset += L + SECTION_GAP;
   }
-  const totalL = Math.max(0.1, offset - SECTION_GAP);
+  const totalL = Math.max(0.1,..._sceneRecords20.map(r=>r.maxX));
+  const firstZ=Math.min(0,..._sceneRecords20.map(r=>r.minZ)),lastZ=Math.max(maxW,..._sceneRecords20.map(r=>r.maxZ));
 
   // склады слева (z<0) и справа (z>W) — пунктирные зоны на земле
   const whL = Math.max(totalL, 8); // м
   for (const side of ['L', 'R']) {
-    const z0 = side === 'L' ? -WH_GAP - WH_DEPTH / 1000 : maxW + WH_GAP;
+    const z0 = side === 'L' ? firstZ-WH_GAP-WH_DEPTH/1000 : lastZ+WH_GAP;
     _zones.push({ kind: 'wh', side, x0: 0, z0,
                   L: whL * 1000, W: WH_DEPTH, H: 100000 });
     const g = new THREE.PlaneGeometry(whL, WH_DEPTH / 1000);
@@ -508,8 +521,8 @@ function sceneBuild(vehicle, truckIdx,vehicles=vehicle?[vehicle]:[]) {
 
   maxX=Math.max(maxX,totalL);
   _buildingWorld20=false;_sceneActive20=truckIdx;
-  if(_sceneRecords20.length){_orbit.target.copy(previousTarget);_orbit.dist=previousDist;focusTruck20(truckIdx,wasReady&&previousActive!==truckIdx);if(wasReady&&previousActive===truckIdx){_orbit.target.copy(previousTarget);_orbit.dist=previousDist;}}
-  else{_vehicleBounds={minX,maxX,minY:-1.5,maxY:maxH,W:maxW};_orbit.target.set((minX+maxX)/2,maxH/3,maxW/2);_orbit.dist=Math.max(12,maxX-minX)*1.35+2}
+  if(_sceneRecords20.length){const current=_sceneRecords20[truckIdx],changed=!previousBounds||['minX','maxX','minY','maxY','minZ','maxZ'].some(k=>Math.abs(current[k]-previousBounds[k])>1e-6);_vehicleBounds={...current};if(!wasReady||previousActive!==truckIdx||changed)focusTruck20(truckIdx,wasReady)}
+  else{stopCameraFlight20();_vehicleBounds={minX,maxX,minY:-1.5,maxY:maxH,W:maxW,minZ:0,maxZ:maxW};_orbit.target.set((minX+maxX)/2,maxH/3,maxW/2);_orbit.dist=Math.max(12,maxX-minX)*1.35+2}
   sceneRender();
 }
 
@@ -556,11 +569,13 @@ function sceneBoxes(boxes, colors, selectedId) {
         color: b.invalid ? 0xd32f2f : (sel ? 0xffd600 : 0x1b1f24),
         linewidth: 2 }));
     e.position.copy(m.position);
+    e.userData.forBox=b.id;
     _cargoGroup.add(e);
 
     // подпись места мелким шрифтом над верхней гранью
     const label = `${ci + 1}. ${b.item.name || t('pos')}`.slice(0, 26);
     const sp = boxLabelSprite(label);
+    sp.userData.forBox=b.id;
     sp.position.set(wp.x, (b.z + b.h) / 1000 + 0.14, wp.z);
     _cargoGroup.add(sp);
   }
@@ -693,7 +708,7 @@ function moveDrag(e) {
   const wp = boxWorld(b);
   for (const o of _cargoGroup.children) {
     if (o.userData && o.userData.boxId === b.id) o.position.set(wp.x, wp.y, wp.z);
-    else if (o.isLineSegments && o.userData.forBox === b.id) o.position.set(wp.x, wp.y, wp.z);
+    else if (o.userData.forBox === b.id) o.position.set(wp.x,o.isSprite?(b.z+b.h)/1000+.14:wp.y,wp.z);
   }
   sceneRender();
 }
@@ -708,12 +723,11 @@ function zoneAt(wx, wz, box) {
   // секции: приоритет, с допуском по ширине
   for (const z of _zones) {
     if (z.kind !== 'sec') continue;
-    if(wx>=z.x0+(z.minX||0)/1000-.3&&wx<=z.x0+(z.maxX??z.L)/1000+.3&&wz>=(z.minY||0)/1000-.45&&wz<=(z.maxY??z.W)/1000+.45)return z;
+    if(wx>=z.x0+(z.minX||0)/1000-.3&&wx<=z.x0+(z.maxX??z.L)/1000+.3&&wz>=z.z0+(z.minY||0)/1000-.45&&wz<=z.z0+(z.maxY??z.W)/1000+.45)return z;
   }
   for (const z of _zones) {
     if (z.kind !== 'wh') continue;
-    if (z.side === 'L' && wz < 0) return z;
-    if (z.side === 'R' && wz > 0) return z;
+    if(wx>=z.x0&&wx<=z.x0+z.L/1000&&wz>=z.z0&&wz<=z.z0+z.W/1000)return z;
   }
   return null;
 }
@@ -750,7 +764,7 @@ function sceneScreenshot() {
 function sceneSetCg(points){
  if(!_cgGroup)return;disposeSceneTree20(_cgGroup);
  for(const point of points){if(!point.visible)continue;const zone=_zones.find(z=>z.kind==='sec'&&z.idx===point.section&&z.truck===_sceneActive20);if(!zone)continue;
- const sphere=new THREE.Mesh(new THREE.SphereGeometry(.13,16,12),new THREE.MeshBasicMaterial({color:point.manual?0xc78d48:0x337f99,depthTest:false,depthWrite:false}));sphere.position.set(zone.x0+point.x/1000,Math.max(.14,point.z/1000),point.y/1000);sphere.userData={section:point.section,truck:_sceneActive20,manual:point.manual};sphere.renderOrder=999;_cgGroup.add(sphere);
+ const sphere=new THREE.Mesh(new THREE.SphereGeometry(.13,16,12),new THREE.MeshBasicMaterial({color:point.manual?0xc78d48:0x337f99,depthTest:false,depthWrite:false}));sphere.position.set(zone.x0+point.x/1000,Math.max(.14,point.z/1000),zone.z0+point.y/1000);sphere.userData={section:point.section,truck:_sceneActive20,manual:point.manual};sphere.renderOrder=999;_cgGroup.add(sphere);
  const label=makeTextSprite(point.manual?'Целевой ЦМ':'Фактический ЦМ',point.manual?'#9b6e39':'#337f99',.3);label.position.copy(sphere.position);label.position.y+=.3;label.material.depthTest=false;label.renderOrder=1000;_cgGroup.add(label);
  }sceneRender();
 }

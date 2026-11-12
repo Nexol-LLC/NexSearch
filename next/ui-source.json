@@ -1,6 +1,6 @@
 {
   "baseline_version": "1.6.7",
-  "reference_commit": "e3599f46e91c3d9e43b1bb05530aa636aa64f9b7",
+  "reference_commit": "46653e7c5314533a7b02490df0332e158f162210",
   "source": "current working tree; confirmed mail fixes included",
   "files": [
     {
@@ -321,8 +321,8 @@
     {
       "source": "pack/src/controls14.js",
       "destination": "pack/src/controls14.js",
-      "source_sha256": "3c4c8ca3d13af59a62e560d013441078c239b419db9f25cd711909f475a5d5eb",
-      "sha256": "3c4c8ca3d13af59a62e560d013441078c239b419db9f25cd711909f475a5d5eb",
+      "source_sha256": "6e4c0759e07bd4a59f5ae839d0a2191917fc411f33b7a8ea11aaf3e6c0dc26a4",
+      "sha256": "6e4c0759e07bd4a59f5ae839d0a2191917fc411f33b7a8ea11aaf3e6c0dc26a4",
       "adaptation": null
     },
     {
@@ -356,8 +356,8 @@
     {
       "source": "pack/src/network-plans.js",
       "destination": "pack/src/network-plans.js",
-      "source_sha256": "8a930adfa990b0cfd11ff3bcafdc28e0221113acd9be6f6802789e1e298cd1e6",
-      "sha256": "8a930adfa990b0cfd11ff3bcafdc28e0221113acd9be6f6802789e1e298cd1e6",
+      "source_sha256": "ad76851c9776c80a81df5a32fe990ab0f03d4b1ad457abcd13b85c21c3b37383",
+      "sha256": "ad76851c9776c80a81df5a32fe990ab0f03d4b1ad457abcd13b85c21c3b37383",
       "adaptation": null
     },
     {
@@ -405,22 +405,22 @@
     {
       "source": "pack/src/scene.js",
       "destination": "pack/src/scene.js",
-      "source_sha256": "ca43be6eceb61b8201534836c0dbaa47c52d52bf555ae72cc93f2f5079c5cf07",
-      "sha256": "ca43be6eceb61b8201534836c0dbaa47c52d52bf555ae72cc93f2f5079c5cf07",
+      "source_sha256": "57e4007e62a3ddca8b05eff7737f224099f504439d835db4167f9f7efba8ab38",
+      "sha256": "57e4007e62a3ddca8b05eff7737f224099f504439d835db4167f9f7efba8ab38",
       "adaptation": null
     },
     {
       "source": "pack/src/simple15.css",
       "destination": "pack/src/simple15.css",
-      "source_sha256": "ad2f2a121ffdc78d65836a7780e88f8b2f692b5516a429624792ee40faf7019b",
-      "sha256": "ad2f2a121ffdc78d65836a7780e88f8b2f692b5516a429624792ee40faf7019b",
+      "source_sha256": "945dad91fc6325039e335d6e555c84d9368dd88b36c74b04ea4c860ef52330fc",
+      "sha256": "945dad91fc6325039e335d6e555c84d9368dd88b36c74b04ea4c860ef52330fc",
       "adaptation": null
     },
     {
       "source": "pack/src/simple15.js",
       "destination": "pack/src/simple15.js",
-      "source_sha256": "2a5e3388da0737a80982bdfbb9b162653821bcb46930cb619b4f42d65a2f763f",
-      "sha256": "2a5e3388da0737a80982bdfbb9b162653821bcb46930cb619b4f42d65a2f763f",
+      "source_sha256": "fabaf288035f5b0b9ff707456e7bbdc366ab10f22578683e643cc6ba256cb325",
+      "sha256": "fabaf288035f5b0b9ff707456e7bbdc366ab10f22578683e643cc6ba256cb325",
       "adaptation": null
     },
     {
@@ -447,8 +447,8 @@
     {
       "source": "pack/src/vehicle-layout.js",
       "destination": "pack/src/vehicle-layout.js",
-      "source_sha256": "c826c9119e2db72fc5512da39c7c340f13d614099f9b63f8f81eb91724c37a66",
-      "sha256": "c826c9119e2db72fc5512da39c7c340f13d614099f9b63f8f81eb91724c37a66",
+      "source_sha256": "49d692961649091c1ef7b681fca62857cef9bffcee3387d25d6314f48e267279",
+      "sha256": "49d692961649091c1ef7b681fca62857cef9bffcee3387d25d6314f48e267279",
       "adaptation": null
     },
     {

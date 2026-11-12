@@ -51,7 +51,7 @@ function sectionAxleLayout(s){
 }
 // Render positions only. Cargo and axle calculations keep their local mm axes.
 function projectSceneLayout(vehicles){
- let end=0;return vehicles.map((vehicle,truck)=>{
+ const records=vehicles.map((vehicle,truck)=>{
   let cursor=0,minX=0,maxX=0,H=0,W=0;const sections=getSections(vehicle).map(section=>{
    const localX=cursor,layout=vehicle.group==='truck'?sectionAxleLayout(section):null;
    minX=Math.min(minX,localX+(layout?Math.min(...layout.axles.map(a=>a.x/1000-a.radius/1000),0):0));
@@ -59,8 +59,14 @@ function projectSceneLayout(vehicles){
    maxX=Math.max(maxX,localX+section.L/1000,...(layout?[...layout.axles.map(a=>localX+(a.x+a.radius)/1000),...layout.modules.map(m=>localX+(m.x+m.l)/1000)]:[]));
    H=Math.max(H,section.H/1000);W=Math.max(W,section.W/1000);cursor+=section.L/1000+.6;return {...section,sceneLocalX:localX};
   });
-  const x=truck?end+6-minX:0;end=x+maxX;
-  return {truck,x,minX:x+minX,maxX:x+maxX,maxY:H,minY:Math.min(-1.5,...sections.map(s=>-(s.trailer?.loadingHeight||1250)/1000-.9)),W,sections};
+  const extents=sections.map(s=>loadingBounds(s));
+  minX=Math.min(minX,...extents.map((b,i)=>sections[i].sceneLocalX+b.minX/1000));maxX=Math.max(maxX,...extents.map((b,i)=>sections[i].sceneLocalX+b.maxX/1000));H=Math.max(H,...extents.map(b=>b.H/1000));
+  const minZ=Math.min(0,...extents.map(b=>b.minY/1000)),maxZ=Math.max(W,...extents.map(b=>b.maxY/1000));
+  return {truck,x:0,z:0,minX,maxX,minZ,maxZ,maxY:H,minY:Math.min(-1.5,...sections.map(s=>-(s.trailer?.loadingHeight||1250)/1000-.9)),W,sections};
  });
+ // A stable lane pitch keeps standard vehicles in place when their type changes.
+ const pitch=Math.max(8,Math.max(0,...records.map(r=>r.maxZ))-Math.min(0,...records.map(r=>r.minZ))+4);
+ for(const record of records){record.z=record.truck*pitch;record.minZ+=record.z;record.maxZ+=record.z}
+ return records;
 }
 if(typeof module!=='undefined')module.exports={TRAILER_AXLE_LAYOUTS,trailerDrawingLayout,sectionAxleLayout,projectSceneLayout};
