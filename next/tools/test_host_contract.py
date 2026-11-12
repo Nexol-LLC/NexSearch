@@ -4,6 +4,7 @@ from uuid import uuid4
 import hashlib, json, os, subprocess, sys, time
 from urllib.parse import quote
 import pytest, requests
+import io,zipfile
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
@@ -225,6 +226,29 @@ def test_native_host_distributes_prepared_employee_package_only_after_login(serv
     assert request(service,people,'director','GET','/api/update/info?platform=HostUbuntu').status_code==400
     (cache/(digest+'.zip')).write_bytes(b'partial')
     assert request(service,people,'alice','GET',path).status_code==503
+
+def test_native_status_diagnostics_and_backup_history_keep_credentials_private(service,people):
+    for route in ('/api/host/status','/api/diagnostics'):
+        result=request(service,people,'alice','GET',route)
+        assert result.status_code==200,result.text
+        assert result.json()['runtime']=='rust'
+        assert not any(word in result.text.lower() for word in ('password','database_url','private_key','old-session-'))
+    assert request(service,people,'alice','GET','/api/admin/backups').status_code==403
+    assert request(service,people,'director','GET','/api/admin/backups').status_code==200
+
+def test_native_excel_uses_the_same_role_scope_and_writes_contacts_as_text(service,people,company):
+    response=request(service,people,'manager','GET','/api/clients/overview/export')
+    assert response.status_code==200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+        strings=z.read('xl/sharedStrings.xml').decode()
+        assert 'Другой отдел' not in strings
+        assert 'Компания контактов' in strings
+        assert b'<f>' not in z.read('xl/worksheets/sheet1.xml')
+    assert request(service,people,'alice','GET','/api/clients/overview/export').status_code==403
+    for section in ('leads','clients','carriers'):
+        result=request(service,people,'bob','GET','/api/export/'+section)
+        assert result.status_code==200
+        assert zipfile.is_zipfile(io.BytesIO(result.content))
 
 
 def test_named_loading_plans_keep_all_preferences_and_are_personal(service,people):

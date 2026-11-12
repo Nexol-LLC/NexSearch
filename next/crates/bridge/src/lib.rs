@@ -112,6 +112,86 @@ pub struct Bridge {
     store: RwLock<Option<SessionStore>>,
 }
 impl Bridge {
+    pub fn host_id(&self) -> &str {
+        &self.trust.host_id
+    }
+    /// Only the signed-update endpoint, over the already pinned transport.
+    pub async fn download_update(
+        &self,
+        role: &str,
+        digest: &str,
+        size: u64,
+        destination: &std::path::Path,
+        progress: impl Fn(u64),
+    ) -> Result<(), String> {
+        if !matches!(role, "EmployeeWindows" | "EmployeeMac")
+            || digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            || size == 0
+            || size > 256 * 1024 * 1024
+        {
+            return Err("Некорректные параметры пакета".into());
+        }
+        let (endpoint, token) = {
+            let s = self.session.read().await;
+            (
+                s.endpoint.clone().ok_or("Хост недоступен")?,
+                s.token.clone().ok_or("Не выполнен вход")?,
+            )
+        };
+        let mut response = self
+            .client
+            .get(format!(
+                "{endpoint}/api/update/package?platform={role}&sha256={digest}"
+            ))
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(600))
+            .send()
+            .await
+            .map_err(|_| "Не удалось скачать обновление")?;
+        if !response.status().is_success() || response.content_length().is_some_and(|n| n != size) {
+            return Err("Хост не подтвердил пакет обновления".into());
+        }
+        let parent = destination.parent().ok_or("Недоступна папка обновления")?;
+        std::fs::create_dir_all(parent).map_err(|_| "Недоступна папка обновления")?;
+        let temp = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|_| "Не удалось создать файл обновления")?;
+        let mut file = tokio::fs::File::from_std(
+            temp.as_file()
+                .try_clone()
+                .map_err(|_| "Не удалось открыть файл обновления")?,
+        );
+        use tokio::io::AsyncWriteExt;
+        let mut count = 0u64;
+        let mut hash = Sha256::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "Загрузка обновления прервана")?
+        {
+            count += chunk.len() as u64;
+            if count > size {
+                return Err("Пакет больше заявленного размера".into());
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(|_| "Не удалось записать обновление")?;
+            hash.update(&chunk);
+            progress(count);
+        }
+        if count != size || format!("{:x}", hash.finalize()) != digest {
+            return Err("Контрольная сумма пакета не совпала".into());
+        }
+        file.sync_all()
+            .await
+            .map_err(|_| "Не удалось сохранить обновление")?;
+        drop(file);
+        temp.persist(destination)
+            .map_err(|_| "Не удалось сохранить обновление")?;
+        Ok(())
+    }
     pub fn storage_scope(&self) -> String {
         format!(
             "{:x}",

@@ -8,12 +8,14 @@ mod crm;
 pub mod db;
 mod discovery;
 pub mod error;
+pub mod legacy_config;
 mod mail;
 mod mail_content;
 mod mail_data;
 mod mail_folders;
 mod mail_ops;
 mod mail_transport;
+mod maintenance;
 mod search;
 mod secrets;
 mod tasks;
@@ -71,6 +73,7 @@ pub struct Host {
     pub(crate) dummy_hash: String,
     pub(crate) search: search::Runtime,
     pub(crate) mail: mail::Runtime,
+    pub(crate) telemetry: Mutex<sysinfo::System>,
     _lease: Mutex<sqlx::PgConnection>,
 }
 impl Host {
@@ -135,6 +138,7 @@ impl Host {
             dummy_hash,
             search: search::Runtime::default(),
             mail: mail::Runtime::default(),
+            telemetry: Mutex::new(sysinfo::System::new_all()),
             _lease: Mutex::new(lease),
         }))
     }
@@ -280,6 +284,9 @@ async fn dispatch_inner(
         ip: &ip,
     };
     if let Some(response) = crm::route(&context).await? {
+        return Ok(response);
+    }
+    if let Some(response) = maintenance::route(&context).await? {
         return Ok(response);
     }
     if let Some(response) = collaboration::route(&context).await? {

@@ -1,0 +1,24 @@
+[package]
+name = "nexsearch-updates"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = "1"
+ed25519-dalek = { version = "2", features = ["pem"] }
+sha2 = "0.10"
+zip = { version = "9.5", default-features = false, features = ["deflate"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tempfile = "3"
+semver = "1"
+nexsearch-bridge.workspace = true
+tokio.workspace = true
+base64 = "0.23"
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+
+[lints]
+workspace = true

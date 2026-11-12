@@ -2,6 +2,7 @@
 from pathlib import Path
 import os,sys,json,subprocess,hashlib,shutil,tempfile,time,ssl,urllib.request,fcntl
 BASE=Path('/opt/nexsearch');CACHE=Path('/var/lib/nexsearch-updater');PUBLIC=Path('/etc/nexsearch/updates-public.pem');PACKAGES=Path('/var/lib/nexsearch-updates')
+SYSTEM_UNIT=Path('/etc/systemd/system/nexsearch.service')
 os.environ['GIT_ASKPASS']='/etc/nexsearch/github-askpass'
 os.environ['GIT_TERMINAL_PROMPT']='0'
 def run(*args,**kwargs):return subprocess.run(args,check=True,**kwargs)
@@ -50,7 +51,49 @@ def configure_retry_units():
   run('systemctl','enable','--now','nexsearch-update.timer','nexsearch-update-retry.timer');stamp.write_text('1')
 
 def retry_needed(state):
- return bool(state.get('host_deferred') or state.get('error') or (PACKAGES/'maintenance.json').exists())
+ return bool(state.get('host_deferred') or state.get('error') or (PACKAGES/'maintenance.json').exists() or native_pending())
+
+def native_pending():
+ try:
+  meta=json.loads((BASE/'current/package-info.json').read_text())
+  return meta.get('runtime') in ('rust','rust-transition') and (not (CACHE/'native-runtime.commit').exists() or (CACHE/'native-runtime.commit').read_text()!=meta['source_commit'])
+ except (OSError,ValueError,KeyError):return False
+
+def activate_native(state):
+ """Complete a signed two-phase upgrade installed by the unmodified 1.6.7 updater.
+
+ That updater only grants executable bits to its known helpers. Its next root
+ retry installs the native unit after re-verifying the package and a DB backup.
+ """
+ if not native_pending():return
+ current=BASE/'current';meta=json.loads((current/'package-info.json').read_text())
+ archive=CACHE/'host-linux.zip';prepared=verified(archive,'HostUbuntu');stage=Path(prepared['state_file']).parent
+ try:
+  signed=json.loads((stage/'package-info.json').read_text())
+  if signed['source_commit']!=meta['source_commit']:raise ValueError('Native upgrade cache does not match installed source')
+  binary=current/'nexsearch-host'
+  if hashlib.sha256(binary.read_bytes()).hexdigest()!=hashlib.sha256((stage/'nexsearch-host').read_bytes()).hexdigest():raise ValueError('Native executable differs from signed package')
+ finally:shutil.rmtree(stage)
+ atomic(PACKAGES/'maintenance.json',{'target_commit':meta['source_commit'],'expires_at':time.time()+2400})
+ try:
+  code="import sys,psycopg; from psycopg.rows import dict_row; sys.path.insert(0,'/opt/nexsearch/current'); from network.update_maintenance import running_searches; c=psycopg.connect('dbname=nexsearch',row_factory=dict_row); print(running_searches(c)); c.commit()"
+  count=int(subprocess.check_output(['runuser','-u','postgres','--',str(BASE/'venv/bin/python'),'-c',code],text=True))
+  if count:state.update(host_deferred='Завершаем поиск перед переходом на Rust',retry_after_seconds=300);return
+  run('runuser','-u','postgres','--',str(BASE/'venv/bin/python'),str(current/'ubuntu/backup_pg.py'))
+  unit=SYSTEM_UNIT;original=unit.read_bytes()
+  text=original.decode();legacy='ExecStart=/opt/nexsearch/venv/bin/python -m network.server';native='ExecStart=/opt/nexsearch/current/nexsearch-host'
+  if legacy not in text and native not in text:raise ValueError('Unknown host unit; refusing to replace it')
+  binary.chmod(0o755)
+  run('systemctl','stop','nexsearch')
+  try:
+   pending=unit.with_suffix('.native-tmp');pending.write_text(text.replace(legacy,native));pending.chmod(0o644);pending.replace(unit)
+   run('systemctl','daemon-reload');run('systemctl','start','nexsearch')
+   if not healthy():raise RuntimeError('Native host did not pass pinned health check')
+   (CACHE/'native-runtime.commit').write_text(meta['source_commit']);state['host_runtime']='rust';state.pop('host_deferred',None);state.pop('retry_after_seconds',None)
+   audit('update.native_activated',{'version':meta['version'],'source_commit':meta['source_commit']})
+  except Exception:
+   unit.write_bytes(original);unit.chmod(0o644);run('systemctl','daemon-reload');run('systemctl','restart','nexsearch');state['host_runtime']='legacy-rollback';audit('update.native_rollback',{'source_commit':meta['source_commit']});raise
+ finally:(PACKAGES/'maintenance.json').unlink(missing_ok=True)
 
 def host_install(archive,digest,state):
  prepared=verified(archive,'HostUbuntu');stage=Path(prepared['state_file']).parent;meta=json.loads((stage/'package-info.json').read_text())
@@ -68,7 +111,7 @@ def host_install(archive,digest,state):
   target=BASE/'releases'/('github-'+digest[:20])
   if not target.exists():shutil.copytree(stage,target,ignore=shutil.ignore_patterns('release.json','release.sig','update-state.json'))
   target.chmod(0o755)
-  for entry in target.rglob('*'):entry.chmod(0o755 if entry.is_dir() or (entry.name=='nexsearch-vpn' and entry.parent.parent==target/'network/bin') else 0o644)
+  for entry in target.rglob('*'):entry.chmod(0o755 if entry.is_dir() or (entry.name=='nexsearch-vpn' and entry.parent.parent==target/'network/bin') or (entry.parent==target and entry.name in ('nexsearch-host','nexsearch-maintenance')) else 0o644)
   shutil.rmtree(stage)
   # Dependencies and all privileged migrations come only from signed packages.
   run(str(BASE/'venv/bin/pip'),'install','-r',str(target/'network/requirements.txt'),stdout=subprocess.DEVNULL)
@@ -101,6 +144,7 @@ def main():
  from datetime import datetime,timezone
  state.update(checked_at=datetime.now(timezone.utc).isoformat(),schedule='10:00 Europe/Moscow',message='Проверяем GitHub')
  try:
+  activate_native(state)
   repo=CACHE/'repo.git'
   if not repo.exists():run('git','init','--bare',str(repo));run('git','--git-dir',str(repo),'remote','add','origin','https://github.com/Nexol-LLC/NexSearch.git')
   run('git','--git-dir',str(repo),'fetch','--depth=1','origin','+refs/heads/host:refs/remotes/origin/host','+refs/heads/employe:refs/remotes/origin/employe',stdout=subprocess.DEVNULL)

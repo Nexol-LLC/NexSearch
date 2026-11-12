@@ -4,6 +4,7 @@ fn main() {
             "legacy_request",
             "open_external",
             "save_file",
+            "export_pdf",
             "quit_app",
             "system_info",
             "copy_text",

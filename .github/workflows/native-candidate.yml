@@ -1,0 +1,68 @@
+name: Native 2.0 migration candidate
+on:
+  workflow_dispatch:
+  push:
+    branches: ['next/2.0-rust']
+    paths: ['next/**', 'network/**', 'pack/**', 'ubuntu/**', '.github/workflows/native-candidate.yml']
+permissions:
+  contents: read
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            role: EmployeeWindows
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            role: HostUbuntu
+          - os: macos-15
+            target: aarch64-apple-darwin
+            role: MacArm
+          - os: macos-15
+            target: x86_64-apple-darwin
+            role: MacIntel
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        working-directory: next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: rustup toolchain install nightly-2026-11-10 --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            next/target
+          key: native-${{ matrix.target }}-${{ hashFiles('next/Cargo.lock') }}
+          restore-keys: native-${{ matrix.target }}-
+      - run: cargo fmt --all --check
+      - run: node tools/verify-ui.mjs
+      - run: node --test tools/*.test.mjs ../pack/tests/*.test.cjs ui/state.test.mjs
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build real native application and installer
+        run: cargo build --release --locked --target ${{ matrix.target }} -p nexsearch-desktop -p nexsearch-host -p nexsearch-updates
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.role }}
+          path: |
+            next/target/${{ matrix.target }}/release/nexsearch.exe
+            next/target/${{ matrix.target }}/release/nexsearch-maintenance.exe
+            next/target/${{ matrix.target }}/release/nexsearch
+            next/target/${{ matrix.target }}/release/nexsearch-host
+            next/target/${{ matrix.target }}/release/nexsearch-maintenance
+          if-no-files-found: error
+          retention-days: 14

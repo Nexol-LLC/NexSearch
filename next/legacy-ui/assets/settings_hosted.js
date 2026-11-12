@@ -1,6 +1,7 @@
 /* Employees can inspect connectivity; host credentials and settings stay private. */
 const connectionSettings=document.createElement('button');connectionSettings.textContent='Настройки';document.querySelector('.session-actions').append(connectionSettings);
 let hostSettingsTimer=null,settingsTab='host',settingsEpoch=0;
+$('#editor').addEventListener('close',()=>{if($('#editor').open)return;clearInterval(hostSettingsTimer);hostSettingsTimer=null;++settingsEpoch});
 function settingsVisible(tab,epoch){return dialogOpen&&$('#host-settings-content')&&settingsTab===tab&&settingsEpoch===epoch}
 function selectSettingsTab(tab){
  clearInterval(hostSettingsTimer);settingsTab=tab;settingsEpoch++;

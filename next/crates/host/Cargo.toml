@@ -12,6 +12,8 @@ rand = "0.8"
 aes-gcm = "0.10"
 tempfile = "3"
 rust_decimal = "1"
+rust_xlsxwriter = "0.102"
+sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
 base64 = "0.23"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }

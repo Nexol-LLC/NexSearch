@@ -1,7 +1,7 @@
 name: NexSearch 2.0 checks
 on:
   push:
-    branches: ['next/**']
+    branches: ['next/**', host, employe]
     paths: ['next/**', 'pack/**', 'network/web/**', '.github/workflows/rust-next.yml']
   pull_request:
     paths: ['next/**', 'pack/**', 'network/web/**', '.github/workflows/rust-next.yml']
@@ -30,7 +30,7 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: node --test ui/state.test.mjs
-      - run: node --test tools/workspace.test.mjs
+      - run: node --test tools/*.test.mjs
       - run: node --test ../pack/tests/*.test.cjs
       - run: node tools/verify-ui.mjs
       - run: cargo build -p nexsearch-desktop -p nexsearch-host --locked

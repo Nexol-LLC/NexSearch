@@ -738,11 +738,8 @@ function exportPdf() {
     CARGO_COLORS, sceneScreenshot());
 }
 
-function downloadScreenshot() {
-  const a = document.createElement('a');
-  a.href = sceneScreenshot();
-  a.download = 'packontruck-scene.png';
-  a.click();
+async function downloadScreenshot() {
+  try{const data=sceneScreenshot().split(',')[1],bytes=Uint8Array.from(atob(data),c=>c.charCodeAt(0));await savePackFile20(bytes,'Схема погрузки.png','image/png')}catch(error){alert('Не удалось сохранить изображение: '+error.message)}
 }
 
 function applyLang() {

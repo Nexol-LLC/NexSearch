@@ -1,13 +1,13 @@
 {
   "baseline_version": "1.6.7",
-  "reference_commit": "46653e7c5314533a7b02490df0332e158f162210",
+  "reference_commit": "d4d0ac2628f89ee5b311d5d573f2260bf91bcb88",
   "source": "current working tree; confirmed mail fixes included",
   "files": [
     {
       "source": "network/web/app.js",
       "destination": "assets/app.js",
-      "source_sha256": "9a4c635e647b034e8af904f52a28bac66dd1a87677dbb8e7d714527a4af882e1",
-      "sha256": "9a4c635e647b034e8af904f52a28bac66dd1a87677dbb8e7d714527a4af882e1",
+      "source_sha256": "5655d9797f268112fbc69c5dd6a7d55d083efe3eb067df0b8c0462ff101a500a",
+      "sha256": "5655d9797f268112fbc69c5dd6a7d55d083efe3eb067df0b8c0462ff101a500a",
       "adaptation": null
     },
     {
@@ -139,8 +139,8 @@
     {
       "source": "network/web/settings_hosted.js",
       "destination": "assets/settings_hosted.js",
-      "source_sha256": "ac9918a0270d9ecb12e211f6e858093453d790eae0b352a8d27effe66950918a",
-      "sha256": "ac9918a0270d9ecb12e211f6e858093453d790eae0b352a8d27effe66950918a",
+      "source_sha256": "51b6a8b3f4c22605c1af63c056e073b8449671772b52f0c98ef1621ba61fd8ea",
+      "sha256": "51b6a8b3f4c22605c1af63c056e073b8449671772b52f0c98ef1621ba61fd8ea",
       "adaptation": null
     },
     {
@@ -286,8 +286,8 @@
     {
       "source": "pack/src/app.js",
       "destination": "pack/src/app.js",
-      "source_sha256": "b823f224ab48e584acead734eaec27c592829e16e2d601df7b24c76bd631bd3b",
-      "sha256": "b823f224ab48e584acead734eaec27c592829e16e2d601df7b24c76bd631bd3b",
+      "source_sha256": "c4cad76e5771cd07f4c483b6963a4fd8221d7cfd40de95a4bc5e05d568aab893",
+      "sha256": "c4cad76e5771cd07f4c483b6963a4fd8221d7cfd40de95a4bc5e05d568aab893",
       "adaptation": null
     },
     {
@@ -335,8 +335,8 @@
     {
       "source": "pack/src/io.js",
       "destination": "pack/src/io.js",
-      "source_sha256": "a362c87fff791244b377cb4b62bb63f1664fb5cd8f416d56b6ad705b533fbfe5",
-      "sha256": "a362c87fff791244b377cb4b62bb63f1664fb5cd8f416d56b6ad705b533fbfe5",
+      "source_sha256": "8917e8cc5c85ee06e030cf7b40f5c562948fd49f4bcf716d246ccf45ea8ea95c",
+      "sha256": "8917e8cc5c85ee06e030cf7b40f5c562948fd49f4bcf716d246ccf45ea8ea95c",
       "adaptation": null
     },
     {
@@ -356,8 +356,8 @@
     {
       "source": "pack/src/network-plans.js",
       "destination": "pack/src/network-plans.js",
-      "source_sha256": "ad76851c9776c80a81df5a32fe990ab0f03d4b1ad457abcd13b85c21c3b37383",
-      "sha256": "ad76851c9776c80a81df5a32fe990ab0f03d4b1ad457abcd13b85c21c3b37383",
+      "source_sha256": "477b163e0cc7ce990ebf073e76fd6afbd81845ab8f5435729d4b63ae9f39ffd8",
+      "sha256": "477b163e0cc7ce990ebf073e76fd6afbd81845ab8f5435729d4b63ae9f39ffd8",
       "adaptation": null
     },
     {
@@ -405,8 +405,8 @@
     {
       "source": "pack/src/scene.js",
       "destination": "pack/src/scene.js",
-      "source_sha256": "57e4007e62a3ddca8b05eff7737f224099f504439d835db4167f9f7efba8ab38",
-      "sha256": "57e4007e62a3ddca8b05eff7737f224099f504439d835db4167f9f7efba8ab38",
+      "source_sha256": "86bfe522ab78fd85f18f1849cde8ea79c09c51e96169492246a9ff765bddbacd",
+      "sha256": "86bfe522ab78fd85f18f1849cde8ea79c09c51e96169492246a9ff765bddbacd",
       "adaptation": null
     },
     {
@@ -419,8 +419,8 @@
     {
       "source": "pack/src/simple15.js",
       "destination": "pack/src/simple15.js",
-      "source_sha256": "fabaf288035f5b0b9ff707456e7bbdc366ab10f22578683e643cc6ba256cb325",
-      "sha256": "fabaf288035f5b0b9ff707456e7bbdc366ab10f22578683e643cc6ba256cb325",
+      "source_sha256": "03bbe626cbc38aff83284eb16d392706ee5e0224f9bcff2096aa0d67b6c10ffd",
+      "sha256": "03bbe626cbc38aff83284eb16d392706ee5e0224f9bcff2096aa0d67b6c10ffd",
       "adaptation": null
     },
     {

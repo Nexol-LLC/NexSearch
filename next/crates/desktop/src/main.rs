@@ -7,6 +7,8 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 mod services;
 use services::*;
+mod printing;
+use printing::export_pdf;
 mod workspace;
 use workspace::*;
 #[derive(serde::Deserialize)]
@@ -15,14 +17,34 @@ struct RuntimeConnection {
     trust: Trust,
     import_session: Option<std::path::PathBuf>,
 }
+struct AppInstance {
+    _file: std::fs::File,
+}
 
 #[tauri::command]
 async fn legacy_request(
     state: State<'_, Arc<Bridge>>,
+    updates: State<'_, Arc<nexsearch_updates::client::Client>>,
     path: String,
     method: String,
     body: Option<String>,
 ) -> Result<Reply, String> {
+    if path == "/api/client/update/status" && method == "GET" {
+        return Ok(Reply::json(200, updates.status()));
+    }
+    if path == "/api/client/update/check" && method == "POST" {
+        return Ok(Reply::json(
+            200,
+            serde_json::json!({"queued":updates.start(true)}),
+        ));
+    }
+    if path == "/api/client/update/install" && method == "POST" {
+        updates.request_install()?;
+        return Ok(Reply::json(
+            200,
+            serde_json::json!({"restart_scheduled":true}),
+        ));
+    }
     Ok(state.request(&path, &method, body).await)
 }
 #[tauri::command]
@@ -44,12 +66,15 @@ async fn save_file(app: tauri::AppHandle, bytes: Vec<u8>, name: String) -> Resul
         .take(120)
         .collect::<String>();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(file) = app
+        let mut dialog = app
             .dialog()
             .file()
             .set_file_name(&name)
-            .blocking_save_file()
-        else {
+            .set_title("Сохранить файл");
+        if let Some(window) = app.get_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        let Some(file) = dialog.blocking_save_file() else {
             return Ok(false);
         };
         let path = file
@@ -90,23 +115,25 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            let program = std::env::current_exe()?
+                .parent()
+                .ok_or("Нет папки программы")?
+                .to_owned();
             let config = std::env::var_os("NEXSEARCH_NEXT_CONFIG")
                 .map(std::path::PathBuf::from)
                 .and_then(|p| std::fs::read(p).ok())
                 .and_then(|b| serde_json::from_slice::<RuntimeConnection>(&b).ok());
-            let trust: Trust =
-                config
-                    .as_ref()
-                    .map(|c| c.trust.clone())
+            let trust: Trust = config.as_ref().map(|c| c.trust.clone()).unwrap_or(
+                std::fs::read(program.join("client-trust.json"))
+                    .ok()
+                    .and_then(|v| serde_json::from_slice(&v).ok())
                     .unwrap_or(serde_json::from_str(include_str!(
                         "../../../../network/client-trust.json"
-                    ))?);
+                    ))?),
+            );
             let bridge = Arc::new(Bridge::new(trust).map_err(std::io::Error::other)?);
-            let store = app
-                .path()
-                .app_config_dir()?
-                .join(bridge.storage_scope())
-                .join("session.sec");
+            let store = nexsearch_updates::client::native_store(&bridge)
+                .ok_or("Недоступна папка сеанса")?;
             tauri::async_runtime::block_on(async {
                 let _ = bridge.configure_store(store).await;
                 if config.is_none() {
@@ -121,6 +148,27 @@ fn main() {
                 }
             });
             app.manage(bridge.clone());
+            let home = nexsearch_updates::client::employee_home(bridge.host_id())
+                .unwrap_or(app.path().app_data_dir()?.join("employee"));
+            std::fs::create_dir_all(&home)?;
+            let instance = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(home.join("instance.lock"))?;
+            instance
+                .try_lock()
+                .map_err(|_| std::io::Error::other("Программа сотрудника уже запущена"))?;
+            app.manage(AppInstance { _file: instance });
+            let updater = nexsearch_updates::client::Client::new(program, home, bridge.clone());
+            app.manage(updater.clone());
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    updater.start(false);
+                }
+            });
             // Offline is used by UI verification. No office/VPS probe is needed to inspect the preserved interface.
             if std::env::var("NEXSEARCH_NEXT_OFFLINE").as_deref() != Ok("1") {
                 tauri::async_runtime::spawn(bridge.discover());
@@ -131,6 +179,7 @@ fn main() {
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .title("NexSearch 2.0")
+            .disable_drag_drop_handler()
             .inner_size(1280., 850.)
             .min_inner_size(1000., 680.)
             .on_navigation(|url| {
@@ -146,6 +195,7 @@ fn main() {
             legacy_request,
             open_external,
             save_file,
+            export_pdf,
             quit_app,
             system_info,
             copy_text,
@@ -159,6 +209,14 @@ fn main() {
             workspace_recommendations,
             custom_service_show
         ])
-        .run(tauri::generate_context!())
-        .expect("Не удалось открыть NexSearch");
+        .build(tauri::generate_context!())
+        .expect("Не удалось открыть NexSearch")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let updater = app.state::<Arc<nexsearch_updates::client::Client>>();
+                if let Err(error) = updater.launch_pending() {
+                    eprintln!("Установка обновления не началась: {error}");
+                }
+            }
+        });
 }

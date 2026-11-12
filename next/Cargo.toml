@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/jobs", "crates/compute", "crates/bridge", "crates/host", "crates/desktop"]
+members = ["crates/core", "crates/jobs", "crates/compute", "crates/bridge", "crates/host", "crates/desktop", "crates/updates"]
 
 [workspace.package]
 version = "2.0.0-alpha.1"
@@ -12,6 +12,7 @@ nexsearch-core = { path = "crates/core" }
 nexsearch-compute = { path = "crates/compute" }
 nexsearch-bridge = { path = "crates/bridge" }
 nexsearch-jobs = { path = "crates/jobs" }
+nexsearch-updates = { path = "crates/updates" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = { version = "2", features = ["serde"] }

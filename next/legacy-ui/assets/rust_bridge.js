@@ -31,6 +31,7 @@
   copy:text=>invoke('copy_text',{text:String(text)}),
   saveFile:(bytes,name)=>invoke('save_file',{bytes:Array.from(bytes),name}),
   exportXlsx:(bytes,name)=>invoke('save_file',{bytes:Array.from(bytes),name}),
+  exportPdf:(html,name)=>invoke('export_pdf',{html,name}),
   quit:()=>invoke('quit_app'),notify:()=>Promise.resolve(),clearNotifications:()=>Promise.resolve(),onNotification:()=>{}
  });
  // Tauri's asset protocol addresses a directory differently from the old HTTP

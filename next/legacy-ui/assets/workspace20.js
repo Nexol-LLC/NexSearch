@@ -20,7 +20,7 @@ async function drawPersonal20(){const epoch=settingsEpoch;$('#host-settings-cont
  $('#personal-service-add20').onclick=async()=>{try{const value=structuredClone(personal20);value.preferences.services.push({id:crypto.randomUUID(),name:val('#personal-service-name20').trim(),url:val('#personal-service-url20').trim()});await savePersonal20(value);await drawPersonal20()}catch(e){asyncError16(e)}};
  $$('[data-service-remove20]').forEach(button=>button.onclick=async()=>{try{const value=structuredClone(personal20);value.preferences.services=value.preferences.services.filter(s=>s.id!==button.dataset.serviceRemove20);await savePersonal20(value);await drawPersonal20()}catch(e){asyncError16(e)}});
 }
-const editorBeforeService20=openEditor;openEditor=(...args)=>{$('#editor').classList.remove('service-add-dialog20');editorBeforeService20(...args);$('#close-editor').onclick=$('#cancel-editor').onclick=()=>closeEditor()};
+const editorBeforeService20=openEditor;openEditor=(...args)=>{$('#editor').classList.remove('service-add-dialog20');editorBeforeService20(...args)};
 async function openPersonalService20(){
  if(!user)return;
  if(personalOwner20!==user.id)await loadPersonal20();

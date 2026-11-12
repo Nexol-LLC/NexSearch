@@ -30,6 +30,12 @@ function importFile(file, done, fail) {
 }
 
 /* Свои шаблоны транспорта — localStorage */
+async function savePackFile20(data,name,type='application/octet-stream'){
+  const blob=data instanceof Blob?data:new Blob([data],{type});
+  const native=window.parent.NexDesktop;
+  if(native?.saveFile)return native.saveFile(new Uint8Array(await blob.arrayBuffer()),name);
+  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return true;
+}
 const LS_KEY = 'packontruck_custom_vehicles';
 
 function loadCustomVehicles() {

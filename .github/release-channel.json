@@ -1,0 +1,6 @@
+{
+  "mode": "source-only",
+  "candidate_version": "2.0.0-alpha.1",
+  "runtime": "rust-tauri",
+  "reason": "Rust installers, signed migration from 1.6.7, native auto-updates and remaining host operations have not passed release acceptance. The legacy pipeline must not publish Python/Electron packages as the Rust candidate."
+}

@@ -8,10 +8,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| "nexsearch_host=info".into()),
         )
         .init();
-    let file = std::env::var_os("NEXSEARCH_HOST_CONFIG")
-        .map(PathBuf::from)
-        .ok_or("Укажите файл настроек через NEXSEARCH_HOST_CONFIG")?;
-    let config: Config = serde_json::from_slice(&std::fs::read(file)?)?;
+    let config: Config =
+        if let Some(file) = std::env::var_os("NEXSEARCH_HOST_CONFIG").map(PathBuf::from) {
+            serde_json::from_slice(&std::fs::read(file)?)?
+        } else {
+            nexsearch_host::legacy_config::from_environment().map_err(std::io::Error::other)?
+        };
     let host = Host::connect(config.clone()).await?;
     let handle = axum_server::Handle::new();
     let shutdown = handle.clone();

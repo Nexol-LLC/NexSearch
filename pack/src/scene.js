@@ -107,15 +107,30 @@ function sceneInit(container, api) {
   _cgGroup=new THREE.Group();_scene.add(_cgGroup);
   _orbit.target = new THREE.Vector3(0, 0, 0);
 
-  let orbiting = null;
-  _canvasEl.addEventListener('mousedown', e => {
+  bindSceneInput20();
+  sceneResize(container);
+  window.addEventListener('resize', () => sceneResize(container));
+  new ResizeObserver(() => sceneResize(container)).observe(container);
+  _canvasEl.addEventListener('webglcontextlost',event=>{event.preventDefault();window.NexPackStatus?.('context-lost')});
+  _canvasEl.addEventListener('webglcontextrestored',()=>{sceneResize(container);window.NexPackStatus?.('ready')});
+}
+
+function bindSceneInput20(){
+  let orbiting = null, activePointer = null;
+  const pointer=!!window.PointerEvent;
+  _canvasEl.style.touchAction='none';
+  _canvasEl.addEventListener(pointer?'pointerdown':'mousedown', e => {
+    if(e.isPrimary===false)return;
+    e.preventDefault();
+    activePointer=e.pointerId??null;
+    if(pointer)try{_canvasEl.setPointerCapture(e.pointerId)}catch{}
     stopCameraFlight20();
     const cg=pickCg(e);
     if(e.button===0&&cg){const zone=_zones.find(z=>z.kind==='sec'&&z.idx===cg.userData.section&&z.truck===cg.userData.truck);_cgDrag={zone,plane:new THREE.Plane(new THREE.Vector3(0,1,0),-cg.position.y)};return;}
     const hit = pickBox(e);
     const other=hit&&_boxes.find(b=>b.id===hit.userData.boxId);if(other?.zone.type==='truck'&&other.zone.truck!==_sceneActive20){_api.onActivateTruck?.(other.zone.truck);selectBox(other.id);return;}
     if(hit&&(e.ctrlKey||e.metaKey)){if(_api.onMultiSelect)_api.onMultiSelect(hit.userData.boxId);return;}
-    if (hit && e.button === 0) {
+    if (hit && e.button === 0 && !e.altKey) {
       if(_api.onBeforeMove)_api.onBeforeMove();
       startDrag(hit, e);
     } else {
@@ -123,23 +138,31 @@ function sceneInit(container, api) {
       orbiting = { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey };
     }
   });
-  window.addEventListener('mouseup', () => {
+  const finish=()=>{
     _cgDrag=null;
     if (_drag) endDrag();
     orbiting = null;
-  });
-  window.addEventListener('mousemove', e => {
+    const id=activePointer;activePointer=null;
+    if(pointer&&id!==null)try{if(_canvasEl.hasPointerCapture(id))_canvasEl.releasePointerCapture(id)}catch{}
+  };
+  window.addEventListener(pointer?'pointerup':'mouseup',finish);
+  window.addEventListener('blur',finish);
+  if(pointer){window.addEventListener('pointercancel',finish);_canvasEl.addEventListener('lostpointercapture',finish)}
+  window.addEventListener(pointer?'pointermove':'mousemove', e => {
+    if(pointer&&e.pointerId!==activePointer)return;
     if(_cgDrag){const pt=planePoint(e,_cgDrag.plane);if(pt&&_api.onCgMove)_api.onCgMove(_cgDrag.zone.idx,(pt.x-_cgDrag.zone.x0)*1000,(pt.z-_cgDrag.zone.z0)*1000);return;}
     if (_drag) { moveDrag(e); return; }
     if (!orbiting) return;
     const dx = e.clientX - orbiting.x, dy = e.clientY - orbiting.y;
+    if(!dx&&!dy)return;
     orbiting.x = e.clientX; orbiting.y = e.clientY;
-    if (orbiting.btn === 2 || orbiting.shift) {
+    if (orbiting.btn === 2 || orbiting.btn===1 || orbiting.shift) {
       const s = _orbit.dist * 0.0015;
       const right = new THREE.Vector3().subVectors(_camera.position, _orbit.target)
         .cross(_camera.up).normalize().multiplyScalar(dx * s);
       _orbit.target.add(right).add(new THREE.Vector3(0, dy * s, 0));
     } else {
+      if(typeof cameraMode14!=='undefined'&&cameraMode14!=='3d')sceneView14('3d');
       _orbit.theta -= dx * 0.006;
       _orbit.phi = Math.min(Math.PI - 0.05, Math.max(0.05, _orbit.phi - dy * 0.006));
     }
@@ -148,16 +171,12 @@ function sceneInit(container, api) {
   _canvasEl.addEventListener('wheel', e => {
     e.preventDefault();
     stopCameraFlight20();
-    _orbit.dist = Math.min(Math.max(150,(_vehicleBounds.maxZ-_vehicleBounds.minZ||0)*3), Math.max(2, _orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+    const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?_canvasEl.clientHeight:1);
+    _orbit.dist = Math.min(Math.max(150,(_vehicleBounds.maxZ-_vehicleBounds.minZ||0)*3), Math.max(2, _orbit.dist * Math.exp(Math.max(-1000,Math.min(1000,pixels))*.0012)));
     sceneRender();
   }, { passive: false });
   _canvasEl.addEventListener('contextmenu', e => e.preventDefault());
 
-  sceneResize(container);
-  window.addEventListener('resize', () => sceneResize(container));
-  new ResizeObserver(() => sceneResize(container)).observe(container);
-  _canvasEl.addEventListener('webglcontextlost',event=>{event.preventDefault();window.NexPackStatus?.('context-lost')});
-  _canvasEl.addEventListener('webglcontextrestored',()=>{sceneResize(container);window.NexPackStatus?.('ready')});
 }
 
 function sceneResize(container) {

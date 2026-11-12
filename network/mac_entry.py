@@ -6,6 +6,12 @@ def main():
     role=sys.argv[1]
     if role not in ('host','employee'):raise ValueError('Unknown program role')
     base=Path(__file__).resolve().parents[1]
+    metadata=base/'package-info.json'
+    if role=='employee' and metadata.is_file() and json.loads(metadata.read_text(encoding='utf-8')).get('runtime')=='rust':
+        # The 1.6.7 updater restarts this entry once. Replace it with the signed
+        # native executable; the old Python runtime never serves the new UI.
+        for name in ('NexSearch','NexSearch Maintenance'):(base/name).chmod(0o700)
+        os.execv(str(base/'NexSearch'),[str(base/'NexSearch')])
     os.environ['NEXOL_RESOURCES']=str(base)
     os.environ['NEXOL_PROGRAM_DIR']=str(base)
     public=json.loads((base/'network/client-trust.json').read_text(encoding='utf-8'))
