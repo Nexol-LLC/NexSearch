@@ -44,7 +44,10 @@ def build(role,binaries,output,key,commit,trust_file=None,version='2.0.0'):
     raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as packet:
         packet.writestr('release.json',raw);packet.writestr('release.sig',key.sign(raw))
-        for name,value in sorted(files.items()):packet.writestr(role+'/'+name,value)
+        for name,value in sorted(files.items()):
+            entry=zipfile.ZipInfo(role+'/'+name);entry.create_system=3
+            entry.external_attr=(0o100755 if name in ('NexSearch','NexSearch Maintenance','nexsearch-host') else 0o100644)<<16
+            entry.compress_type=zipfile.ZIP_DEFLATED;packet.writestr(entry,value)
     assert output.stat().st_size<=256*1024*1024,'Package exceeds the installed client download limit'
     print(json.dumps({'role':role,'version':version,'runtime':runtime,'size_bytes':output.stat().st_size,'sha256':hashlib.sha256(output.read_bytes()).hexdigest()}))
     return manifest

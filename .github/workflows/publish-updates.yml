@@ -25,13 +25,13 @@ jobs:
           path = Path('.github/release-channel.json')
           policy = json.loads(path.read_text()) if path.exists() else {'mode': 'legacy-release'}
           mode = policy.get('mode')
-          if mode not in ('source-only', 'legacy-release'):
+          if mode not in ('source-only', 'legacy-release', 'native-release'):
               raise SystemExit('Unknown release mode; refusing to publish packages')
           enabled = mode == 'legacy-release'
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('enabled=' + str(enabled).lower() + '\n')
           if not enabled:
-              print('::notice::Source publication only. Existing signed packages remain unchanged. ' + policy.get('reason', ''))
+              print('::notice::Legacy builder disabled. Native releases use native-candidate.yml. ' + policy.get('reason', ''))
           PY
   source:
     needs: release_gate

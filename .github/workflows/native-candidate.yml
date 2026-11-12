@@ -2,11 +2,34 @@ name: Native 2.0 migration candidate
 on:
   workflow_dispatch:
   push:
-    branches: ['next/2.0-rust']
-    paths: ['next/**', 'network/**', 'pack/**', 'ubuntu/**', '.github/workflows/native-candidate.yml']
+    branches: ['next/2.0-rust', host, employe]
+    paths-ignore: ['.updates/**', '**/*.md']
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
+  policy:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.policy.outputs.enabled }}
+      host_tip: ${{ steps.policy.outputs.host_tip }}
+      employe_tip: ${{ steps.policy.outputs.employe_tip }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: policy
+        run: |
+          python - <<'PY'
+          import json,os,subprocess
+          mode=json.load(open('.github/release-channel.json'))['mode']
+          assert mode in ('source-only','native-release')
+          refs=subprocess.check_output(['git','ls-remote','origin','refs/heads/host','refs/heads/employe'],text=True)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('enabled='+str(mode=='native-release').lower()+'\n')
+              for line in refs.splitlines():
+                  sha,ref=line.split();out.write(ref.rsplit('/',1)[1]+'_tip='+sha+'\n')
+          PY
   binaries:
     strategy:
       fail-fast: false
@@ -82,6 +105,7 @@ jobs:
           lipo -verify_arch x86_64 arm64 output/NexSearch
           lipo -verify_arch x86_64 arm64 'output/NexSearch Maintenance'
           ./output/NexSearch --self-check
+          arch -x86_64 ./output/NexSearch --self-check
       - uses: actions/upload-artifact@v4
         with: {name: native-EmployeeMac, path: output, if-no-files-found: error, retention-days: 14}
   ubuntu_transition:
@@ -107,3 +131,28 @@ jobs:
         run: sudo env GITHUB_ACTIONS=true "$RUNNER_TEMP/acceptance/bin/python" next/tools/test-systemd-transition.py candidate/nexsearch-host "$RUNNER_TEMP/legacy-updater.py"
       - if: failure()
         run: sudo journalctl -u nexsearch -n 100 --no-pager
+  publish:
+    needs: [policy, binaries, mac_universal, ubuntu_transition]
+    if: needs.policy.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: native-*, path: input}
+      - run: pip install 'cryptography>=43,<47'
+      - name: Sign, verify with 1.6.7, and atomically promote both branches
+        id: promote
+        env:
+          NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
+          EXPECTED_HOST_TIP: ${{ needs.policy.outputs.host_tip }}
+          EXPECTED_EMPLOYE_TIP: ${{ needs.policy.outputs.employe_tip }}
+        run: python next/tools/publish-native.py --input input --promote
+      - name: Publish downloadable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.promote.outputs.release_commit }}
+        run: |
+          version=$(python -c "import json; print(json.load(open('version.json'))['version'])")
+          gh release create "v$version" .updates/*.zip --target "$RELEASE_COMMIT" --title "NexSearch $version — Rust и Tauri" --notes-file next/RELEASE-2.0.md
