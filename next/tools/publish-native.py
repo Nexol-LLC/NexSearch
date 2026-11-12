@@ -56,7 +56,7 @@ def main():
     print('All six packages verified with the installed-client reader; ready for atomic promotion.')
     if not a.promote:return
     assert os.environ.get('GITHUB_ACTIONS')=='true','Promotion is only available in the protected CI release context'
-    git('fetch','origin','+refs/heads/host:refs/remotes/origin/host','+refs/heads/employe:refs/remotes/origin/employe')
+    git('fetch','--depth=1','--no-tags','origin','+refs/heads/host:refs/remotes/origin/host','+refs/heads/employe:refs/remotes/origin/employe')
     tips={branch:git('rev-parse','refs/remotes/origin/'+branch) for branch in ('host','employe')}
     for branch,tip in tips.items():assert tip==os.environ['EXPECTED_'+branch.upper()+'_TIP'],'Production branch changed during the build: '+branch
     git('config','user.name','NexSearch Builds');git('config','user.email','nexsearch-builds@users.noreply.github.com')
