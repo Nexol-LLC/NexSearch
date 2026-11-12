@@ -522,7 +522,7 @@ pub async fn run_scheduler(host: Arc<Host>) {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
-async fn tick(host: &Arc<Host>) -> Result<()> {
+async fn paused(host: &Host) -> bool {
     if let Ok(bytes) = tokio::fs::read(host.config.update_dir.join("maintenance.json")).await
         && bytes.len() < 16384
         && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
@@ -530,9 +530,21 @@ async fn tick(host: &Arc<Host>) -> Result<()> {
             .as_f64()
             .is_some_and(|t| t > chrono::Utc::now().timestamp() as f64)
     {
+        return true;
+    }
+    false
+}
+async fn tick(host: &Arc<Host>) -> Result<()> {
+    if paused(host).await {
         return Ok(());
     }
     let mut tx = db::transaction(&host.pool, None, true).await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(73142004)")
+        .execute(&mut *tx)
+        .await?;
+    if paused(host).await {
+        return Ok(());
+    }
     sqlx::query("WITH due AS (SELECT s.* FROM search_schedules s JOIN employees e ON e.id=s.employee_id WHERE s.status='pending' AND s.run_at<=now() AND e.active AND e.approved AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.employee_id=s.employee_id AND j.status IN ('queued','running')) ORDER BY s.run_at LIMIT 1 FOR UPDATE OF s SKIP LOCKED), inserted AS (INSERT INTO jobs(id,employee_id,target,criteria,message) SELECT gen_random_uuid(),employee_id,target,criteria,'По расписанию' FROM due RETURNING *) UPDATE search_schedules s SET status='queued',job_id=j.id FROM inserted j WHERE s.id IN(SELECT id FROM due) AND s.employee_id=j.employee_id").execute(&mut *tx).await?;
     let slots = 4usize.saturating_sub(host.search.cancellations.lock().await.len());
     if slots == 0 {

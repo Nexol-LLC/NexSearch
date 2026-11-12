@@ -113,6 +113,15 @@ impl Host {
         if !exclusive {
             return Err("Для этой базы уже запущен другой Rust-хост".into());
         }
+        // The installed 1.6.7 privileged updater checks this session lease before
+        // draining searches. Keep its exact lock so live Rust jobs are never
+        // mistaken for abandoned Python jobs during later updates.
+        let worker: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(73142003)")
+            .fetch_one(&mut lease)
+            .await?;
+        if !worker {
+            return Err("Для этой базы уже работает служба поиска".into());
+        }
         {
             let mut tx = db::transaction(&pool, None, true).await?;
             sqlx::query("UPDATE jobs SET status=CASE WHEN stop_requested THEN 'stopped' ELSE 'queued' END,message='Восстанавливаем поиск после перезапуска' WHERE status='running'").execute(&mut *tx).await?;
@@ -157,6 +166,22 @@ pub fn json_response(value: Value) -> Response {
     Json(value).into_response()
 }
 pub fn start_background(host: Arc<Host>) {
+    let owner = host.clone();
+    tokio::spawn(async move {
+        use sqlx::Connection;
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if owner._lease.lock().await.ping().await.is_err() {
+                tracing::error!(
+                    "Потеряно исключительное соединение поиска; требуется перезапуск службы"
+                );
+                // systemd restarts the host and reacquires both locks before any
+                // recovery. Continuing with a pool after losing a session lock
+                // could overlap another worker after PostgreSQL restarts.
+                std::process::exit(1);
+            }
+        }
+    });
     tokio::spawn(discovery::run(host.clone()));
     tokio::spawn(mail::run_scheduler(host.clone()));
     tokio::spawn(search::run_scheduler(host));

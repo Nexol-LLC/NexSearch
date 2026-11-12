@@ -349,3 +349,25 @@ def test_dated_route_quotes_keep_amount_vat_and_employee_scope(service,people):
     assert any(r['origin']=='Москва' and r['destination']=='Казань' for r in routes.json()['routes'])
     future={**body,'as_of':(now+timedelta(days=2)).isoformat()}
     assert request(service,people,'alice','POST','/api/routes/quotes',json=future).status_code==422
+
+
+def test_legacy_updater_recognizes_native_live_search_and_maintenance_keeps_queue(service,people):
+    from network.update_maintenance import running_searches
+    _,_,db,home=service
+    ident=uuid4()
+    with db.transaction(admin=True) as conn:
+        assert conn.execute('SELECT pg_try_advisory_xact_lock(73142003) AS available').fetchone()['available'] is False
+        conn.execute("INSERT INTO jobs(id,employee_id,target,status) VALUES(%s,%s,1,'running')",(ident,people['alice']['id']))
+        assert running_searches(conn)==1
+        assert conn.execute('SELECT status FROM jobs WHERE id=%s',(ident,)).fetchone()['status']=='running'
+        conn.execute("UPDATE jobs SET status='stopped',stop_requested=true WHERE id=%s",(ident,))
+    marker=home/'updates/maintenance.json';marker.parent.mkdir(exist_ok=True)
+    marker.write_text(json.dumps({'expires_at':time.time()+30}))
+    try:
+        created=request(service,people,'alice','POST','/api/search',json={'target':1,'criteria':{'region':'Проверка заморозки'}})
+        assert created.status_code==200,created.text
+        job=created.json()['id'];time.sleep(1.5)
+        with db.transaction(admin=True) as conn:
+            assert conn.execute('SELECT status FROM jobs WHERE id=%s',(job,)).fetchone()['status']=='queued'
+            conn.execute("UPDATE jobs SET status='stopped',stop_requested=true WHERE id=%s",(job,))
+    finally:marker.unlink(missing_ok=True)
