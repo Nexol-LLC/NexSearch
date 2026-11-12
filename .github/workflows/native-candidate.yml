@@ -100,6 +100,7 @@ jobs:
           mkdir -p output
           lipo -create input/native-MacIntel/nexsearch input/native-MacArm/nexsearch -output output/NexSearch
           lipo -create input/native-MacIntel/nexsearch-maintenance input/native-MacArm/nexsearch-maintenance -output 'output/NexSearch Maintenance'
+          chmod +x output/NexSearch 'output/NexSearch Maintenance'
           codesign --force --sign - output/NexSearch
           codesign --force --sign - 'output/NexSearch Maintenance'
           lipo output/NexSearch -verify_arch x86_64 arm64
