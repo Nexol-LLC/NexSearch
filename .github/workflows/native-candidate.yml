@@ -102,8 +102,8 @@ jobs:
           lipo -create input/native-MacIntel/nexsearch-maintenance input/native-MacArm/nexsearch-maintenance -output 'output/NexSearch Maintenance'
           codesign --force --sign - output/NexSearch
           codesign --force --sign - 'output/NexSearch Maintenance'
-          lipo -verify_arch x86_64 arm64 output/NexSearch
-          lipo -verify_arch x86_64 arm64 'output/NexSearch Maintenance'
+          lipo output/NexSearch -verify_arch x86_64 arm64
+          lipo 'output/NexSearch Maintenance' -verify_arch x86_64 arm64
           ./output/NexSearch --self-check
           arch -x86_64 ./output/NexSearch --self-check
       - uses: actions/upload-artifact@v4
@@ -141,7 +141,8 @@ jobs:
         with: {python-version: '3.12'}
       - uses: actions/download-artifact@v4
         with: {pattern: native-*, path: input}
-      - run: pip install 'cryptography>=43,<47'
+      - run: pip install 'cryptography>=43,<47' pytest
+      - run: python -m pytest next/tools/test_native_packaging.py -q
       - name: Sign, verify with 1.6.7, and atomically promote both branches
         id: promote
         env:

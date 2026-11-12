@@ -35,7 +35,9 @@ def verify(archive,key,commit,version):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--input',required=True,type=Path);p.add_argument('--output',default='.updates',type=Path);p.add_argument('--promote',action='store_true');a=p.parse_args()
     commit=git('rev-parse','HEAD');version=json.loads((ROOT/'version.json').read_text())['version']
-    assert version=='2.0.0' and json.loads((ROOT/'.github/release-channel.json').read_text())['mode']=='native-release'
+    parts=version.split('.')
+    assert len(parts)==3 and all(p.isdigit() for p in parts) and tuple(map(int,parts))>=(2,0,0)
+    assert json.loads((ROOT/'.github/release-channel.json').read_text())['mode']=='native-release'
     key=Ed25519PrivateKey.from_private_bytes(base64.b64decode(os.environ['NEXSEARCH_SIGNING_KEY']))
     public=serialization.load_pem_public_key((ROOT/'updates-public.pem').read_bytes())
     assert key.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw)==public.public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw),'Signing key does not match installed trust'

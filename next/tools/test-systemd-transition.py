@@ -48,7 +48,7 @@ with psycopg.connect('dbname=nexsearch') as c:
  for name in ('schema.sql','schema14.sql','schema15.sql','schema16.sql','schema17.sql','schema18.sql','schema19.sql'):c.execute((Path('/opt/nexsearch/current/network')/name).read_text())
  c.execute("INSERT INTO employees(id,login,first_name,last_name,password_hash,role,requested_role,approved,is_admin) VALUES(%s,'migration','Проверка','Перехода',%s,'director','director',true,true)",(v['employee'],PasswordHasher().hash('fixture-migration-password')))
  c.execute("INSERT INTO sessions(token_hash,employee_id,device_id,expires_at) VALUES(%s,%s,'old-device',now()+interval '30 days')",(hashlib.sha256(v['token'].encode()).hexdigest(),v['employee']))
- c.execute("INSERT INTO carriers(id,name,inn,phone,email) VALUES(gen_random_uuid(),'Сохранённый перевозчик','7700000016','fixture-phone','fixture@example.org')")
+ c.execute("INSERT INTO carriers(id,name,inn,phone,email,created_by,updated_by) VALUES(gen_random_uuid(),'Сохранённый перевозчик','7700000016','fixture-phone','fixture@example.org',%s,%s)",(v['employee'],v['employee']))
  c.execute('GRANT USAGE ON SCHEMA public TO nexsearch_app');c.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO nexsearch_app');c.execute('GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO nexsearch_app');c.execute('REVOKE UPDATE,DELETE ON audit_events,call_records FROM nexsearch_app')
  c.commit()
 '''
