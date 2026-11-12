@@ -143,7 +143,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: {pattern: native-*, path: input}
       - run: pip install 'cryptography>=43,<47' pytest
-      - run: python -m pytest next/tools/test_native_packaging.py -q
+      - run: python -m pytest next/tools/test_native_packaging.py network/tests/test_native_mac_schedule.py -q
       - name: Sign, verify with 1.6.7, and atomically promote both branches
         id: promote
         env:

@@ -2,6 +2,35 @@
 from pathlib import Path
 import json,os,sys,traceback
 
+def native_schedule(base,home,host_id):
+    """Keep the existing daily LaunchAgent, but use the native protected session.
+
+    Otherwise a later login/logout in Rust would leave the old Python agent
+    checking updates with the obsolete token in employee.sec.
+    """
+    import plistlib,subprocess,tempfile
+    from uuid import UUID
+    UUID(host_id)
+    agent=Path.home()/'Library/LaunchAgents'/('com.nexsearch.updates.'+host_id+'.plist')
+    if not agent.is_file():return
+    try:
+        with agent.open('rb') as stream:settings=plistlib.load(stream)
+        if settings.get('Label')!='com.nexsearch.updates.'+host_id:return
+        arguments=[str(base/'NexSearch Maintenance'),'check-daily','--program',str(base),'--home',str(home)]
+        if settings.get('ProgramArguments')==arguments:return
+        settings['ProgramArguments']=arguments;settings['WorkingDirectory']=str(base)
+        # Preserve the established calendar interval and private log locations.
+        with tempfile.NamedTemporaryFile(dir=agent.parent,delete=False) as stream:
+            temporary=Path(stream.name);plistlib.dump(settings,stream);stream.flush();os.fsync(stream.fileno())
+        temporary.chmod(0o600);temporary.replace(agent)
+        domain='gui/'+str(os.getuid());label=settings['Label']
+        for command in (['/bin/launchctl','bootout',domain+'/'+label],['/bin/launchctl','bootstrap',domain,str(agent)]):
+            subprocess.run(command,check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5)
+    except (OSError,ValueError,KeyError,subprocess.SubprocessError):
+        # The written agent also loads on the next login. A scheduler failure
+        # must never prevent opening the application or its in-app updater.
+        pass
+
 def main():
     role=sys.argv[1]
     if role not in ('host','employee'):raise ValueError('Unknown program role')
@@ -13,6 +42,7 @@ def main():
         for name in ('NexSearch','NexSearch Maintenance'):(base/name).chmod(0o700)
         public=json.loads((base/'network/client-trust.json').read_text(encoding='utf-8'))
         home=Path.home()/'Library/Application Support/NexSearch/Employees'/public['host_id']
+        native_schedule(base,home,public['host_id'])
         if (home/'employee.sec').is_file() and not (home/'native-migration.complete').exists():
             # Read with the already trusted old Keychain identity, then hand off
             # through an anonymous pipe. No token in argv, environment or a file.
