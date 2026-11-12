@@ -7,6 +7,14 @@ ROOT=Path(__file__).resolve().parents[2]
 def run(*args,**kwargs):return subprocess.run(args,check=True,**kwargs)
 def module(path,name):
     spec=importlib.util.spec_from_file_location(name,path);value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
+
+def initial_source(initial):
+    for name in ('network','ubuntu','pack'):shutil.copytree(ROOT/name,initial/name,ignore=shutil.ignore_patterns('__pycache__','.runtime'),dirs_exist_ok=True)
+    # The legacy API imports collector/checko/catalog/export modules from the
+    # source root before starting. A network-only fixture is not a 1.6.7 install.
+    for source in ROOT.iterdir():
+        if source.is_file() and source.suffix in ('.py','.json'):shutil.copy2(source,initial/source.name)
+    (initial/'version.json').write_text(json.dumps({'version':'1.6.7','schema':19}))
 def main():
     assert sys.platform=='linux' and os.geteuid()==0 and os.environ.get('GITHUB_ACTIONS')=='true','Expendable Ubuntu CI VM required'
     assert not Path('/etc/nexsearch').exists() and not Path('/opt/nexsearch').exists(),'Existing installation is preserved; refusing acceptance setup'
@@ -15,8 +23,7 @@ def main():
     for path in ('/opt/nexsearch/releases/initial','/opt/nexsearch/control/network','/etc/nexsearch','/var/lib/nexsearch/identity','/var/lib/nexsearch-updater','/var/lib/nexsearch-updates/packages','/var/lib/nexsearch-backups'):
         Path(path).mkdir(parents=True)
     initial=Path('/opt/nexsearch/releases/initial')
-    for name in ('network','ubuntu','pack'):shutil.copytree(ROOT/name,initial/name,ignore=shutil.ignore_patterns('__pycache__','.runtime'),dirs_exist_ok=True)
-    (initial/'version.json').write_text(json.dumps({'version':'1.6.7','schema':19}));shutil.copy2(ROOT/'timezones.json',initial/'timezones.json')
+    initial_source(initial)
     (initial/'package-info.json').write_text(json.dumps({'version':'1.6.7','schema':19,'source_commit':'old-ci'}))
     Path('/opt/nexsearch/current').symlink_to(initial)
     run('python3','-m','venv','/opt/nexsearch/venv','--system-site-packages')

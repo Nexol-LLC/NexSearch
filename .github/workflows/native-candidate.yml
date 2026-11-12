@@ -6,6 +6,7 @@ on:
     paths-ignore: ['.updates/**', '**/*.md']
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: native-${{ github.ref }}
   cancel-in-progress: false
@@ -110,15 +111,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: {name: native-EmployeeMac, path: output, if-no-files-found: error, retention-days: 14}
   ubuntu_transition:
-    needs: binaries
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - uses: actions/download-artifact@v4
-        with: {name: native-HostUbuntu, path: candidate}
       - name: Prepare isolated systemd acceptance VM
         run: |
           sudo apt-get update
@@ -128,6 +126,16 @@ jobs:
           "$RUNNER_TEMP/acceptance/bin/pip" install -r network/requirements.txt
           git fetch --depth=1 origin tag v1.6.7
           git show v1.6.7:ubuntu/updater.py > "$RUNNER_TEMP/legacy-updater.py"
+      - name: Wait for this run's signed-input host binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 40); do
+            if gh run download "$GITHUB_RUN_ID" --name native-HostUbuntu --dir candidate; then exit 0; fi
+            sleep 15
+          done
+          echo 'The native host build did not produce its artifact in time.' >&2
+          exit 1
       - name: Exercise the actual old updater and native systemd service
         run: sudo env GITHUB_ACTIONS=true "$RUNNER_TEMP/acceptance/bin/python" next/tools/test-systemd-transition.py candidate/nexsearch-host "$RUNNER_TEMP/legacy-updater.py"
       - if: failure()
