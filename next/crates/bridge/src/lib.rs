@@ -95,6 +95,7 @@ impl Reply {
 }
 #[derive(Default)]
 struct Session {
+    preference: String,
     endpoint: Option<String>,
     remembered_endpoint: Option<String>,
     pending_legacy: Option<Value>,
@@ -104,6 +105,8 @@ struct Session {
     device_id: String,
 }
 pub struct Bridge {
+    internet: RwLock<Option<String>>,
+    internet_error: RwLock<String>,
     client: reqwest::Client,
     trust: Trust,
     session: RwLock<Session>,
@@ -112,6 +115,81 @@ pub struct Bridge {
     store: RwLock<Option<SessionStore>>,
 }
 impl Bridge {
+    pub async fn load_internet_profile(
+        &self,
+        program: &std::path::Path,
+    ) -> Result<(), &'static str> {
+        let file = program.join("internet-access.json");
+        if !file.exists() {
+            return Ok(());
+        }
+        let result = (|| -> Result<String, &'static str> {
+            let data = std::fs::read(file).map_err(|_| "Не удалось прочитать файл подключения")?;
+            if data.len() > 16384 {
+                return Err("Слишком большой файл подключения");
+            }
+            let value: Value =
+                serde_json::from_slice(&data).map_err(|_| "Некорректный файл подключения")?;
+            if value.as_object().is_none_or(|o| o.len() != 4)
+                || value["version"] != 1
+                || value["host_id"] != self.trust.host_id
+                || value["fingerprint"] != self.trust.fingerprint
+            {
+                return Err("Файл интернет-подключения предназначен для другого хоста");
+            }
+            let address = value["url"]
+                .as_str()
+                .filter(|v| valid_endpoint(v))
+                .ok_or("Некорректный адрес интернет-шлюза")?;
+            let url = url::Url::parse(address).map_err(|_| "Некорректный адрес шлюза")?;
+            let public = match url.host() {
+                Some(url::Host::Ipv4(ip)) => {
+                    !(ip.is_private()
+                        || ip.is_loopback()
+                        || ip.is_link_local()
+                        || ip.is_unspecified()
+                        || ip.is_broadcast()
+                        || ip.is_multicast())
+                }
+                Some(url::Host::Ipv6(ip)) => {
+                    !(ip.is_loopback()
+                        || ip.is_unique_local()
+                        || ip.is_unicast_link_local()
+                        || ip.is_unspecified()
+                        || ip.is_multicast())
+                }
+                Some(url::Host::Domain(host)) => {
+                    host.contains('.') && !host.ends_with(".local") && !host.ends_with(".localhost")
+                }
+                _ => false,
+            };
+            if !public {
+                return Err("Для интернет-шлюза нужен публичный адрес");
+            }
+            Ok(address.trim_end_matches('/').to_owned())
+        })();
+        match result {
+            Ok(url) => {
+                *self.internet.write().await = Some(url);
+                self.internet_error.write().await.clear();
+                Ok(())
+            }
+            Err(error) => {
+                *self.internet.write().await = None;
+                *self.internet_error.write().await = error.into();
+                Err(error)
+            }
+        }
+    }
+    async fn transport_state(&self) -> Value {
+        let remote = self.internet.read().await.clone();
+        let state = self.session.read().await;
+        let internet = state
+            .endpoint
+            .as_deref()
+            .is_some_and(|u| remote.as_deref() == Some(u.trim_end_matches('/')));
+        json!({"preference":if state.preference.is_empty(){"auto"}else{&state.preference},"transport":if state.endpoint.is_none(){None}else if internet{Some("internet")}else{Some("lan")},"host_url":state.endpoint,"host_found":state.endpoint.is_some(),"internet_configured":remote.is_some(),"internet_online":internet,"internet_url":remote,"internet_error":self.internet_error.read().await.clone(),"internet_checked_at":null})
+    }
     pub fn host_id(&self) -> &str {
         &self.trust.host_id
     }
@@ -233,6 +311,8 @@ impl Bridge {
             .build()
             .map_err(|_| "Не удалось создать защищённое подключение")?;
         Ok(Self {
+            internet: RwLock::new(None),
+            internet_error: RwLock::new(String::new()),
             client,
             trust,
             session: RwLock::new(Session::default()),
@@ -252,6 +332,10 @@ impl Bridge {
             state.profile = saved.profile;
             state.device_id = saved.device_id;
             state.remembered_endpoint = saved.endpoint;
+            state.preference = match saved.connection_preference.as_str() {
+                "lan" | "internet" => saved.connection_preference,
+                _ => "auto".into(),
+            };
         }
         *self.store.write().await = Some(store);
         Ok(())
@@ -260,6 +344,7 @@ impl Bridge {
         let s = self.session.read().await;
         if let Some(store) = self.store.read().await.as_ref() {
             store.save(&SavedSession {
+                connection_preference: s.preference.clone(),
                 host_id: self.trust.host_id.clone(),
                 fingerprint: self.trust.fingerprint.clone(),
                 device_id: if s.device_id.is_empty() {
@@ -271,6 +356,15 @@ impl Bridge {
                 profile: s.profile.clone(),
                 endpoint: s.endpoint.clone().or_else(|| s.remembered_endpoint.clone()),
             })?;
+            if s.token.is_some()
+                && let Some(path) = session_store::legacy_session_path(&self.trust.host_id)
+                && let Some(home) = path.parent()
+            {
+                // A non-secret marker avoids rereading the old Mac Keychain key
+                // on every later launch after the verified native session exists.
+                let _ = std::fs::create_dir_all(home);
+                let _ = std::fs::write(home.join("native-migration.complete"), b"1");
+            }
         }
         Ok(())
     }
@@ -326,7 +420,7 @@ impl Bridge {
     /// Prepare the legacy address without authorizing a cached token/profile.
     /// Trust is checked afresh when discovery reconnects to the address.
     pub async fn prepare_legacy_session(&self) {
-        if self.has_session().await {
+        if self.has_session().await || self.session.read().await.pending_legacy.is_some() {
             return;
         }
         let Some(path) = session_store::legacy_session_path(&self.trust.host_id) else {
@@ -338,6 +432,16 @@ impl Bridge {
         let Ok(saved) = session_store::read_legacy(&path) else {
             return;
         };
+        self.prepare_legacy_value(saved).await;
+    }
+    /// A migration pipe is only an address/token hint, never an authenticated user.
+    pub async fn prepare_legacy_value(&self, saved: Value) {
+        if saved["token"]
+            .as_str()
+            .is_none_or(|s| s.is_empty() || s.len() > 256)
+        {
+            return;
+        }
         let hint = saved["active_host_url"]
             .as_str()
             .or_else(|| saved["host_url"].as_str())
@@ -345,6 +449,13 @@ impl Bridge {
             .map(str::to_owned);
         let mut session = self.session.write().await;
         if session.token.is_none() {
+            if session.preference.is_empty() {
+                session.preference = saved["connection_preference"]
+                    .as_str()
+                    .filter(|m| matches!(*m, "auto" | "lan" | "internet"))
+                    .unwrap_or("auto")
+                    .into();
+            }
             if session.remembered_endpoint.is_none() {
                 session.remembered_endpoint = hint;
             }
@@ -352,12 +463,24 @@ impl Bridge {
         }
     }
     pub async fn reconnect_saved(&self) -> Result<(), &'static str> {
-        let endpoint = self.session.read().await.remembered_endpoint.clone();
-        if let Some(endpoint) = endpoint {
-            self.connect(&endpoint).await
-        } else {
-            Err("Сохранённый адрес хоста не найден")
+        let (endpoint, mode) = {
+            let state = self.session.read().await;
+            (state.remembered_endpoint.clone(), state.preference.clone())
+        };
+        let remote = self.internet.read().await.clone();
+        if mode != "internet"
+            && let Some(endpoint) = endpoint
+            && (remote.as_deref() != Some(endpoint.trim_end_matches('/')))
+            && self.connect(&endpoint).await.is_ok()
+        {
+            return Ok(());
         }
+        if mode != "lan"
+            && let Some(remote) = remote
+        {
+            return self.connect(&remote).await;
+        }
+        Err("Проверенный хост пока недоступен")
     }
     async fn restore_legacy_if_needed(&self) {
         if self.has_session().await {
@@ -416,7 +539,7 @@ impl Bridge {
             let s = self.session.read().await;
             (s.endpoint.clone(), s.token.clone(), s.profile.clone())
         };
-        let transport = json!({"preference":"auto","transport":if endpoint.is_some(){Some("lan")}else{None},"host_url":endpoint,"host_found":endpoint.is_some(),"internet_configured":false,"internet_online":false,"internet_error":"","internet_checked_at":null});
+        let transport = self.transport_state().await;
         if path == "/api/connection" {
             let mut connection = transport;
             connection["csrf"] = json!(self.csrf);
@@ -425,7 +548,40 @@ impl Bridge {
             return Reply::json(200, connection);
         }
         if path == "/api/client/transport" {
-            return Reply::json(200, transport);
+            if method == "POST" {
+                let value = body
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok());
+                let mode = value
+                    .as_ref()
+                    .and_then(|v| v["preference"].as_str())
+                    .unwrap_or("");
+                if !matches!(mode, "auto" | "lan" | "internet") {
+                    return Reply::json(
+                        422,
+                        json!({"error":"Выберите локальную сеть, интернет или автоматическое подключение"}),
+                    );
+                }
+                if mode == "internet" && self.internet.read().await.is_none() {
+                    return Reply::json(
+                        422,
+                        json!({"error":"Файл подключения к интернет-шлюзу не установлен или не прошёл проверку"}),
+                    );
+                }
+                {
+                    let mut state = self.session.write().await;
+                    state.preference = mode.into();
+                    state.endpoint = None;
+                }
+                let _ = self.save_session().await;
+                let _ = self.reconnect_saved().await;
+                self.restore_legacy_if_needed().await;
+            }
+            return Reply::json(200, self.transport_state().await);
+        }
+        if path == "/api/client/internet/check" && method == "POST" {
+            let _ = self.reconnect_saved().await;
+            return Reply::json(200, self.transport_state().await);
         }
         if path == "/api/client/exit" && method == "POST" {
             return Reply::json(200, json!({"ok":true}));
@@ -563,6 +719,10 @@ impl Bridge {
             if self.reconnect_saved().await.is_ok() {
                 continue;
             }
+            if self.session.read().await.preference == "internet" {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
             let _ = self.connect("https://127.0.0.1:8743").await;
             if let Ok(sock) = tokio::net::UdpSocket::bind("0.0.0.0:0").await {
                 let _ = sock.set_broadcast(true);
@@ -669,5 +829,32 @@ mod tests {
         let b = Bridge::new(trust()).unwrap();
         assert!(b.connect("http://127.0.0.1:1").await.is_err());
         assert!(b.connect("https://user:pass@example.org").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn relay_profile_is_pinned_and_never_accepts_unrelated_or_private_gateways() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = Bridge::new(trust()).unwrap();
+        let profile = json!({"version":1,"host_id":"test-host","fingerprint":"00".repeat(32),"url":"https://relay.example.org:18443"});
+        std::fs::write(dir.path().join("internet-access.json"), profile.to_string()).unwrap();
+        b.load_internet_profile(dir.path()).await.unwrap();
+        assert_eq!(b.transport_state().await["internet_configured"], true);
+        let mut wrong = profile.clone();
+        wrong["host_id"] = "different-office".into();
+        std::fs::write(dir.path().join("internet-access.json"), wrong.to_string()).unwrap();
+        assert!(b.load_internet_profile(dir.path()).await.is_err());
+        assert_eq!(b.transport_state().await["internet_configured"], false);
+        wrong = profile;
+        wrong["url"] = "https://127.0.0.1:18443".into();
+        std::fs::write(dir.path().join("internet-access.json"), wrong.to_string()).unwrap();
+        assert!(b.load_internet_profile(dir.path()).await.is_err());
+        let result = b
+            .request(
+                "/api/client/transport",
+                "POST",
+                Some(json!({"preference":"internet"}).to_string()),
+            )
+            .await;
+        assert_eq!(result.status, 422);
     }
 }

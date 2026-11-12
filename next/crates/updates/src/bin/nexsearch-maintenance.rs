@@ -23,6 +23,7 @@ fn restart(program: &Path, home: Option<&Path>) -> Result<()> {
         "NexSearch"
     });
     let mut command = std::process::Command::new(executable);
+    command.env_remove("NEXSEARCH_LEGACY_HANDOFF");
     command.current_dir(program);
     if let Some(home) = home {
         command.env("NEXOL_HOME", home);
@@ -51,6 +52,7 @@ fn run() -> Result<serde_json::Value> {
             );
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async {
+                let _ = bridge.load_internet_profile(&program).await;
                 let store = nexsearch_updates::client::native_store(&bridge)
                     .context("Недоступно хранилище сеанса")?;
                 bridge

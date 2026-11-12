@@ -78,6 +78,30 @@ async fn certificate_is_checked_before_any_http_request_or_password() {
     assert_eq!(count.load(Ordering::SeqCst), 0);
     server.abort();
 }
+
+#[tokio::test]
+async fn migration_pipe_is_not_a_login_until_the_original_host_confirms_it() {
+    let (endpoint, trust, count, server) = fixture().await;
+    let bridge = Arc::new(Bridge::new(trust).unwrap());
+    bridge.prepare_legacy_value(json!({"token":"fixture-session-secret","host_url":endpoint,"device_id":"old-mac-device"})).await;
+    let visible = bridge.request("/api/connection", "GET", None).await;
+    let value: Value = serde_json::from_slice(&STANDARD.decode(visible.body).unwrap()).unwrap();
+    assert!(value["profile"].is_null());
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    let task = tokio::spawn(bridge.clone().discover());
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !bridge.has_session().await {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let reply = bridge.request("/api/me", "GET", None).await;
+    let value: Value = serde_json::from_slice(&STANDARD.decode(reply.body).unwrap()).unwrap();
+    assert_eq!(value["authenticated"], true);
+    task.abort();
+    server.abort();
+}
 #[tokio::test]
 async fn verified_host_keeps_session_secret_in_rust_only() {
     let (endpoint, trust, count, server) = fixture().await;

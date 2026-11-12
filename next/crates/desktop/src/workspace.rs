@@ -124,7 +124,42 @@ pub async fn workspace_get(
 ) -> Result<Value, String> {
     let me = get(&bridge, "/api/me").await?["employee"].clone();
     let id = id_of(&me)?;
-    let saved = load(&path(&app, &bridge, id)?, id)?;
+    let file = path(&app, &bridge, id)?;
+    let mut saved = load(&file, id)?;
+    if !file.exists() {
+        let mut imported = false;
+        if let Ok(config) = app.path().app_config_dir()
+            && let Some(base) = config.parent()
+        {
+            let earlier = base
+                .join("ru.nexol.nexsearch.preview2")
+                .join(bridge.storage_scope())
+                .join(format!("personal-{id}.json"));
+            if earlier.is_file() {
+                saved = load(&earlier, id)?;
+                imported = true;
+            }
+        }
+        if !imported && let Some(home) = nexsearch_updates::client::employee_home(bridge.host_id())
+        {
+            let prefs = nexsearch_updates::appearance::read(&home);
+            if let Some(value) = prefs
+                .get(&format!("nexsearch.appearance.{id}"))
+                .or_else(|| prefs.get("nexsearch.appearance.default"))
+            {
+                saved.preferences.theme = serde_json::from_value(value["theme"].clone())
+                    .map_err(|_| "Некорректная сохранённая тема")?;
+                saved.preferences.density = serde_json::from_value(value["density"].clone())
+                    .map_err(|_| "Некорректная плотность интерфейса")?;
+                saved.preferences.reduced_motion = value["motion"] == false;
+                imported = true;
+            }
+        }
+        if imported {
+            nexsearch_updates::atomic_json(&file, &saved)
+                .map_err(|_| "Не удалось перенести оформление")?;
+        }
+    }
     Ok(json!({"workspace":saved,"employee":me}))
 }
 #[tauri::command]

@@ -9,6 +9,7 @@ mod services;
 use services::*;
 mod printing;
 use printing::export_pdf;
+mod notifications;
 mod workspace;
 use workspace::*;
 #[derive(serde::Deserialize)]
@@ -111,10 +112,26 @@ fn system_info() -> serde_json::Value {
     serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"interface_baseline":"1.6.7","cpu_kernel":nexsearch_compute::Kernel::detect(),"migration_complete":false})
 }
 fn main() {
+    if std::env::args().any(|v| v == "--self-check") {
+        println!(
+            "{}",
+            serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"runtime":"rust","interface":"tauri"})
+        );
+        return;
+    }
+    let handoff = if std::env::var("NEXSEARCH_LEGACY_HANDOFF").as_deref() == Ok("1") {
+        use std::io::Read;
+        let mut data = Vec::new();
+        let _ = std::io::stdin().take(8192).read_to_end(&mut data);
+        serde_json::from_slice::<serde_json::Value>(&data).ok()
+    } else {
+        None
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .setup(|app| {
+        .setup(move |app| {
             let program = std::env::current_exe()?
                 .parent()
                 .ok_or("Нет папки программы")?
@@ -135,7 +152,9 @@ fn main() {
             let store = nexsearch_updates::client::native_store(&bridge)
                 .ok_or("Недоступна папка сеанса")?;
             tauri::async_runtime::block_on(async {
+                let _ = bridge.load_internet_profile(&program).await;
                 let _ = bridge.configure_store(store).await;
+                if let Some(saved)=handoff.clone(){bridge.prepare_legacy_value(saved).await;}
                 if config.is_none() {
                     bridge.prepare_legacy_session().await;
                 }
@@ -148,6 +167,8 @@ fn main() {
                 }
             });
             app.manage(bridge.clone());
+            app.manage(notifications::Notifications::default());
+            notifications::bind(app.handle()).map_err(std::io::Error::other)?;
             let home = nexsearch_updates::client::employee_home(bridge.host_id())
                 .unwrap_or(app.path().app_data_dir()?.join("employee"));
             std::fs::create_dir_all(&home)?;
@@ -161,6 +182,8 @@ fn main() {
                 .try_lock()
                 .map_err(|_| std::io::Error::other("Программа сотрудника уже запущена"))?;
             app.manage(AppInstance { _file: instance });
+            let appearance=nexsearch_updates::appearance::read(&home);
+            let appearance_script=format!("try{{for(const [key,value] of Object.entries({})){{if(localStorage.getItem(key)===null)localStorage.setItem(key,JSON.stringify(value));}}}}catch{{}}",serde_json::to_string(&appearance)?);
             let updater = nexsearch_updates::client::Client::new(program, home, bridge.clone());
             app.manage(updater.clone());
             tauri::async_runtime::spawn(async move {
@@ -179,6 +202,7 @@ fn main() {
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .title("NexSearch 2.0")
+            .initialization_script(&appearance_script)
             .disable_drag_drop_handler()
             .inner_size(1280., 850.)
             .min_inner_size(1000., 680.)
@@ -207,7 +231,9 @@ fn main() {
             workspace_get,
             workspace_save,
             workspace_recommendations,
-            custom_service_show
+            custom_service_show,
+            notifications::notify_employee,
+            notifications::notifications_clear
         ])
         .build(tauri::generate_context!())
         .expect("Не удалось открыть NexSearch")

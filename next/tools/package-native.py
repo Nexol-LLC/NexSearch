@@ -14,7 +14,9 @@ def build(role,binaries,output,key,commit,trust_file=None,version='2.0.0'):
         import sys
         sys.path.insert(0,str(ROOT))
         from package_update import source_files
-        files={name:p.read_bytes() for p,name in source_files() if not name.startswith('network/bin/')}
+        import subprocess
+        tracked=set(subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True,encoding='utf-8').splitlines())
+        files={name:p.read_bytes() for p,name in source_files() if name in tracked and not name.startswith('network/bin/')}
         files['nexsearch-host']=(binaries/'nexsearch-host').read_bytes()
         runtime='rust-transition'
     elif role=='EmployeeWindows':

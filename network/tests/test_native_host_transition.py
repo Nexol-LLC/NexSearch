@@ -41,3 +41,10 @@ def test_changed_native_file_is_rejected_before_services_are_stopped(updater,mon
     module,calls=updater;(module.BASE/'current/nexsearch-host').write_bytes(b'tampered');state={}
     with pytest.raises(ValueError):module.activate_native(state)
     assert not calls
+
+def test_live_search_keeps_the_claim_freeze_until_next_automatic_retry(updater,monkeypatch):
+    module,calls=updater;monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'2');state={}
+    module.activate_native(state)
+    assert state['retry_after_seconds']==300 and module.native_pending()
+    assert (module.PACKAGES/'maintenance.json').is_file()
+    assert not calls

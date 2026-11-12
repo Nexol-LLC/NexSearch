@@ -1,10 +1,12 @@
 """Real TLS + PostgreSQL contract tests. A new cluster per run; no work data."""
 from pathlib import Path
-from uuid import uuid4
+from uuid import uuid4,UUID
 import hashlib, json, os, subprocess, sys, time
 from urllib.parse import quote
 import pytest, requests
 import io,zipfile
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
@@ -194,7 +196,7 @@ def test_native_host_serves_interface_without_exposing_server_sources(service):
     session,base,_,_=service
     page=session.get(base+'/',timeout=5)
     assert page.status_code==200 and '<!doctype html>' in page.text.lower()
-    assert 'NexSearch 2.0.0-alpha.1' in page.text
+    assert 'NexSearch 2.0.0' in page.text
     assert page.headers['X-Content-Type-Options']=='nosniff'
     script=session.get(base+'/assets/app.js',timeout=5)
     assert script.status_code==200 and 'javascript' in script.headers['Content-Type']
@@ -236,6 +238,70 @@ def test_native_status_diagnostics_and_backup_history_keep_credentials_private(s
     assert request(service,people,'alice','GET','/api/admin/backups').status_code==403
     assert request(service,people,'director','GET','/api/admin/backups').status_code==200
 
+@pytest.mark.skipif(sys.platform!='win32',reason='real DPAPI and Windows installer handoff')
+def test_employee_downloads_and_installs_native_update_over_pinned_tls(service,people,tmp_path):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    from network import secure_store
+    session,base,_,host_home=service
+    program=tmp_path/'program';home=tmp_path/'employee';program.mkdir();home.mkdir()
+    helper=Path(os.environ.get('NEXSEARCH_TEST_NATIVE_HELPER',ROOT/'next/target/debug/nexsearch-maintenance.exe'));assert helper.is_file()
+    shutil.copy2(helper,program/'NexSearch Maintenance.exe')
+    trust=json.loads((host_home/'identity/host-identity.json').read_text())
+    (program/'client-trust.json').write_text(json.dumps(trust))
+    key=Ed25519PrivateKey.generate();(program/'updates-public.pem').write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
+    (program/'NexSearch.exe').write_bytes(b'old-program-fixture');(program/'package-info.json').write_text(json.dumps({'version':'1.6.7','source_commit':'before'}))
+    token=people['alice']['headers']['Authorization'][7:]
+    secure_store.write(home/'employee.sec',{'token':token,'device_id':'old-device','host_url':base,'connection_preference':'auto'})
+    before=(home/'employee.sec').read_bytes()
+    files={'NexSearch.exe':b'new-program-fixture','package-info.json':json.dumps({'version':'2.0.0','source_commit':'native-integration','runtime':'rust'}).encode()}
+    manifest={'role':'EmployeeWindows','schema':19,'version':'2.0.0','source_commit':'native-integration','runtime':'rust','files':{'EmployeeWindows/'+n:hashlib.sha256(v).hexdigest() for n,v in files.items()}}
+    raw=json.dumps(manifest,sort_keys=True).encode();payload=io.BytesIO()
+    with zipfile.ZipFile(payload,'w',zipfile.ZIP_DEFLATED) as z:
+        z.writestr('release.json',raw);z.writestr('release.sig',key.sign(raw))
+        for name,value in files.items():z.writestr('EmployeeWindows/'+name,value)
+    archive=payload.getvalue();digest=hashlib.sha256(archive).hexdigest();cache=host_home/'updates/packages';cache.mkdir(parents=True,exist_ok=True);(cache/(digest+'.zip')).write_bytes(archive)
+    (host_home/'updates/status.json').write_text(json.dumps({'checked_at':'2026-11-13T07:00:00+00:00','packages':{'EmployeeWindows':{'version':'2.0.0','source_commit':'native-integration','sha256':digest,'size_bytes':len(archive)}}}))
+    env={**os.environ,'APPDATA':str(tmp_path/'appdata'),'NEXOL_HOME':str(home)}
+    result=subprocess.run([str(helper),'check-daily','--program',str(program),'--home',str(home),'--force'],env=env,capture_output=True,text=True,encoding='utf-8',timeout=30)
+    assert result.returncode==0,result.stderr
+    until=time.monotonic()+10
+    while time.monotonic()<until and (program/'NexSearch.exe').read_bytes()!=b'new-program-fixture':time.sleep(.1)
+    assert (program/'NexSearch.exe').read_bytes()==b'new-program-fixture',result.stdout
+    assert (home/'employee.sec').read_bytes()==before
+    assert json.loads((home/'updates/daily.json').read_text())['phase']=='installed'
+    assert token not in result.stdout+result.stderr
+
+def test_four_simultaneous_searches_each_receive_distinct_companies(service,people):
+    session,base,db,_=service
+    with db.transaction(admin=True) as conn:
+        for i in range(8):
+            digits='7800'+str(i+8000).zfill(5)
+            inn=digits+str(sum(int(d)*w for d,w in zip(digits,[2,4,10,3,5,9,4,6,8]))%11%10)
+            payload={'name':'Проверка параллельного поиска '+str(i),'inn':inn,'region':'Тест параллелизма','verification':{'active':True},'financial':{'revenue_rub':50000000}}
+            conn.execute("INSERT INTO companies(id,name,inn,payload,state,active_verified,verified_at) VALUES(%s,%s,%s,%s,'ready',true,now())",(uuid4(),payload['name'],inn,Jsonb(payload)))
+    names=['alice','bob','outside','director']
+    def start(name):
+        # Each request has its own HTTP session; do not serialize through a test lock.
+        with requests.Session() as s:
+            s.trust_env=False;s.mount('https://',PinnedAdapter(session.adapters['https://'].fingerprint))
+            result=s.post(base+'/api/search',headers=people[name]['headers'],json={'target':2,'criteria':{'region':'Тест параллелизма','company_count':2}},timeout=10)
+        assert result.status_code==200,result.text
+        return result.json()
+    started=time.monotonic()
+    with ThreadPoolExecutor(max_workers=4) as pool:jobs=list(pool.map(start,names))
+    until=time.monotonic()+15
+    while time.monotonic()<until:
+        with db.transaction(admin=True) as conn:
+            rows=conn.execute('SELECT id,status,added FROM jobs WHERE id=ANY(%s)',([UUID(job['id']) for job in jobs],)).fetchall()
+        if len(rows)==4 and all(row['status'] in ('completed','partial','error','stopped') for row in rows):break
+        time.sleep(.1)
+    assert len(rows)==4 and all(row['status']=='completed' and row['added']==2 for row in rows),rows
+    with db.transaction(admin=True) as conn:
+        found=conn.execute('SELECT company_id,employee_id FROM employee_leads WHERE job_id=ANY(%s)',([UUID(job['id']) for job in jobs],)).fetchall()
+    assert len(found)==8 and len({r['company_id'] for r in found})==8
+    assert time.monotonic()-started<15
+
 def test_native_excel_uses_the_same_role_scope_and_writes_contacts_as_text(service,people,company):
     response=request(service,people,'manager','GET','/api/clients/overview/export')
     assert response.status_code==200
@@ -265,3 +331,21 @@ def test_named_loading_plans_keep_all_preferences_and_are_personal(service,peopl
     changed=request(service,people,'alice','PUT',path,json={'name':'Обновлённая схема','project':project,'revision':plan['revision']})
     assert changed.status_code==200,changed.text
     assert request(service,people,'alice','PUT',path,json={'name':'Устаревшее изменение','project':project,'revision':plan['revision']}).status_code==409
+
+
+def test_dated_route_quotes_keep_amount_vat_and_employee_scope(service,people):
+    from datetime import datetime,timezone,timedelta
+    now=datetime.now(timezone.utc)
+    body={'origin':'Москва','destination':'Казань','source':'Перевозчик','amount_rub':'120000.50','vat':'included','vat_rate':22,'vehicle_type':'tent','pricing_basis':'trip','as_of':now.isoformat(),'valid_until':(now+timedelta(days=1)).isoformat()}
+    saved=request(service,people,'alice','POST','/api/routes/quotes',json=body)
+    assert saved.status_code==200,saved.text
+    quote=saved.json()
+    assert float(quote['amount_rub'])==120000.50 and float(quote['vat_rate'])==22
+    rows=request(service,people,'alice','GET','/api/rates/history?origin=Москва').json()['quotes']
+    assert any(q['id']==quote['id'] and q['freshness']['state']=='fresh' for q in rows)
+    assert not any(q['id']==quote['id'] for q in request(service,people,'bob','GET','/api/rates/history').json()['quotes'])
+    routes=request(service,people,'alice','GET','/api/routes')
+    assert routes.status_code==200,routes.text
+    assert any(r['origin']=='Москва' and r['destination']=='Казань' for r in routes.json()['routes'])
+    future={**body,'as_of':(now+timedelta(days=2)).isoformat()}
+    assert request(service,people,'alice','POST','/api/routes/quotes',json=future).status_code==422

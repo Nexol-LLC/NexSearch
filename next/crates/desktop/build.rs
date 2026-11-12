@@ -17,6 +17,8 @@ fn main() {
             "workspace_save",
             "workspace_recommendations",
             "custom_service_show",
+            "notify_employee",
+            "notifications_clear",
         ]),
     ))
     .expect("Не удалось подготовить настольное приложение");

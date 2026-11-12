@@ -490,7 +490,11 @@ async fn claim_cache(host: &Host, owner: Uuid, job: Uuid, criteria: &Criteria) -
         }
         query.push(")");
     }
-    query.push(" ORDER BY created_at LIMIT 1000 FOR UPDATE OF c SKIP LOCKED");
+    // Reservation is the UNIQUE(company_id) insert below. Locking an entire
+    // candidate page here made other employees see an empty cache and finish
+    // with zero leads while the first search held all company row locks.
+    // A common order also prevents conflicting reservations from forming cycles.
+    query.push(" ORDER BY created_at,id LIMIT 1000");
     let rows: Vec<(Uuid, Value)> = query.build_query_as().fetch_all(&mut *tx).await?;
     let mut count = 0;
     for (id, item) in rows {

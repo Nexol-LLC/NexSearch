@@ -21,6 +21,7 @@ base64 = "0.23"
 open = "5"
 tempfile = "3"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2.8.1"
 tauri-plugin-clipboard-manager = "2"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

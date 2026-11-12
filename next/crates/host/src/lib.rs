@@ -16,6 +16,7 @@ mod mail_folders;
 mod mail_ops;
 mod mail_transport;
 mod maintenance;
+mod rates;
 mod search;
 mod secrets;
 mod tasks;
@@ -287,6 +288,9 @@ async fn dispatch_inner(
         return Ok(response);
     }
     if let Some(response) = maintenance::route(&context).await? {
+        return Ok(response);
+    }
+    if let Some(response) = rates::route(&context).await? {
         return Ok(response);
     }
     if let Some(response) = collaboration::route(&context).await? {

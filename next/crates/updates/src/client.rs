@@ -20,6 +20,7 @@ pub struct Client {
     busy: AtomicBool,
     state: Mutex<Value>,
     restart: AtomicBool,
+    installer_started: AtomicBool,
 }
 fn read(path: &Path) -> Value {
     fs::read(path)
@@ -58,10 +59,15 @@ impl Client {
             busy: AtomicBool::new(false),
             state: Mutex::new(state),
             restart: AtomicBool::new(false),
+            installer_started: AtomicBool::new(false),
         })
     }
     fn change(&self, fields: Value) {
         let mut value = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let disk = read(&self.home.join("updates/daily.json"));
+        if disk.as_object().is_some_and(|o| !o.is_empty()) {
+            *value = disk;
+        }
         if !value.is_object() {
             *value = json!({})
         }
@@ -73,7 +79,12 @@ impl Client {
         let _ = atomic_json(&self.home.join("updates/daily.json"), &*value);
     }
     pub fn status(&self) -> Value {
-        let mut value = self.state.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let disk = read(&self.home.join("updates/daily.json"));
+        let mut value = if disk.as_object().is_some_and(|o| !o.is_empty()) {
+            disk
+        } else {
+            self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        };
         let installed = read(&self.program.join("package-info.json"));
         value["installed_version"] = installed["version"]
             .as_str()
@@ -81,7 +92,23 @@ impl Client {
             .into();
         value["installed_commit"] = installed["source_commit"].clone();
         value["supports_restart"] = true.into();
-        value["checking"] = self.busy.load(Ordering::Acquire).into();
+        let locked = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.home.join("updates/check.lock"))
+            .ok()
+            .is_some_and(|file| file.try_lock().is_err());
+        let checking = self.busy.load(Ordering::Acquire) || locked;
+        value["checking"] = checking.into();
+        if !checking
+            && matches!(
+                value["phase"].as_str(),
+                Some("checking" | "downloading" | "verifying")
+            )
+        {
+            value["phase"] = "error".into();
+            value["message"] = "Проверка обновления прервалась. Можно повторить проверку.".into();
+        }
         value
     }
     pub fn start(self: &Arc<Self>, force: bool) -> bool {
@@ -216,6 +243,9 @@ impl Client {
         Ok(())
     }
     pub fn request_install(&self) -> Result<(), String> {
+        if self.busy.load(Ordering::Acquire) {
+            return Err("Дождитесь завершения проверки обновления".into());
+        }
         let state = self.status();
         let path = state["pending_state"]
             .as_str()
@@ -234,6 +264,9 @@ impl Client {
         Ok(())
     }
     pub fn launch_pending(&self) -> Result<bool, String> {
+        if self.installer_started.load(Ordering::Acquire) {
+            return Ok(false);
+        }
         let state = self.status();
         let Some(file) = state["pending_state"].as_str() else {
             return Ok(false);
@@ -282,6 +315,7 @@ impl Client {
         command
             .spawn()
             .map_err(|_| "Не удалось запустить установщик")?;
+        self.installer_started.store(true, Ordering::Release);
         Ok(true)
     }
 }

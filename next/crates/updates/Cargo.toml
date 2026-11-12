@@ -14,6 +14,7 @@ serde_json.workspace = true
 uuid.workspace = true
 tempfile = "3"
 semver = "1"
+rusty-leveldb = "4.0.2"
 nexsearch-bridge.workspace = true
 tokio.workspace = true
 base64 = "0.23"

@@ -140,3 +140,23 @@ fn newer_install_between_download_and_exit_is_never_downgraded() {
     assert!(apply(&file).is_err());
     assert_eq!(fs::read(program.join("NexSearch.exe")).unwrap(), b"old");
 }
+
+#[cfg(windows)]
+#[test]
+fn locked_late_file_restores_earlier_files_and_removes_new_resources() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (dir, program, archive) = fixture(None);
+    let file = prepare(&archive, &program, dir.path(), "EmployeeWindows").unwrap();
+    let _locked = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(3)
+        .open(program.join("package-info.json"))
+        .unwrap();
+    assert!(apply(&file).is_err());
+    assert_eq!(fs::read(program.join("NexSearch.exe")).unwrap(), b"old");
+    assert!(!program.join("native-resource.txt").exists());
+    assert_eq!(
+        fs::read(program.join("employee.sec")).unwrap(),
+        b"encrypted-session-must-stay"
+    );
+}

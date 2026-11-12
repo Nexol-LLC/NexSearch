@@ -12,6 +12,7 @@ use std::{
 };
 
 pub const MAX_ARCHIVE: u64 = 256 * 1024 * 1024;
+pub mod appearance;
 pub mod client;
 const MAX_EXPANDED: u64 = 2 * 1024 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -251,7 +252,7 @@ pub fn prepare(archive: &Path, program: &Path, home: &Path, role: &str) -> Resul
         role: role.into(),
         version: manifest.version,
         files,
-        verified_at: String::new(),
+        verified_at: chrono::Utc::now().to_rfc3339(),
     };
     atomic_json(&stage.path().join("update-state.json"), &state)?;
     Ok(stage.keep().join("update-state.json"))
@@ -366,20 +367,31 @@ pub fn apply(state_file: &Path) -> Result<PathBuf> {
         rollback.files.push(name.clone());
     }
     atomic_json(&folder.join("rollback-state.json"), &rollback)?;
+    let mut applied = Vec::new();
     for name in state.files.keys() {
-        if let Err(error) = replace(
-            &target(&state.stage, name)?,
-            &target(&state.program, name)?,
-            executable(name),
-        ) {
-            restore(&folder).context("Ошибка восстановления предыдущих файлов")?;
+        let result = (|| {
+            replace(
+                &target(&state.stage, name)?,
+                &target(&state.program, name)?,
+                executable(name),
+            )
+        })();
+        if let Err(error) = result {
+            // A locked destination that was never replaced must not prevent
+            // restoration of the files already changed earlier in this attempt.
+            rollback.files = applied;
+            restore_files(&folder, &rollback).context("Ошибка восстановления предыдущих файлов")?;
             bail!("Установка отменена, предыдущая версия восстановлена: {error}");
         }
+        applied.push(name.clone());
     }
     Ok(folder)
 }
 pub fn restore(folder: &Path) -> Result<()> {
     let state: Rollback = serde_json::from_slice(&fs::read(folder.join("rollback-state.json"))?)?;
+    restore_files(folder, &state)
+}
+fn restore_files(folder: &Path, state: &Rollback) -> Result<()> {
     for name in &state.files {
         let source = target(folder, name)?;
         let destination = target(&state.program, name)?;

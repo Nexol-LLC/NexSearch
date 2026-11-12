@@ -32,7 +32,7 @@
   saveFile:(bytes,name)=>invoke('save_file',{bytes:Array.from(bytes),name}),
   exportXlsx:(bytes,name)=>invoke('save_file',{bytes:Array.from(bytes),name}),
   exportPdf:(html,name)=>invoke('export_pdf',{html,name}),
-  quit:()=>invoke('quit_app'),notify:()=>Promise.resolve(),clearNotifications:()=>Promise.resolve(),onNotification:()=>{}
+  quit:()=>invoke('quit_app'),notify:value=>invoke('notify_employee',{value}),clearNotifications:()=>invoke('notifications_clear'),onNotification:handler=>window.__TAURI__.event.listen('nexsearch:notification',event=>handler(event.payload)).catch(()=>{})
  });
  // Tauri's asset protocol addresses a directory differently from the old HTTP
  // server. Normalize only the PackOnTruck document URL, preserving its query.

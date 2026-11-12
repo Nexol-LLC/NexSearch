@@ -22,6 +22,10 @@
     "allow-workspace-save",
     "allow-workspace-recommendations",
     "allow-custom-service-show",
-    "allow-export-pdf"
+    "allow-export-pdf",
+    "allow-notify-employee",
+    "allow-notifications-clear",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

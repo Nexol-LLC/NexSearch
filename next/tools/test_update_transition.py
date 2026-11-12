@@ -1,6 +1,7 @@
 """Actual old Python installer -> native Rust installer contract, in temp folders."""
 from pathlib import Path
 import hashlib,json,subprocess,sys,zipfile
+import os
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
@@ -29,7 +30,7 @@ def kit(tmp_path):
     return program,home,archive,session_bytes
 
 def helper():
-    path=ROOT/'next/target/debug'/('nexsearch-maintenance.exe' if sys.platform=='win32' else 'nexsearch-maintenance')
+    path=Path(os.environ.get('NEXSEARCH_TEST_NATIVE_HELPER',ROOT/'next/target/debug'/('nexsearch-maintenance.exe' if sys.platform=='win32' else 'nexsearch-maintenance')))
     assert path.is_file(),'Build the real native helper before migration acceptance'
     return path
 

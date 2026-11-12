@@ -66,3 +66,44 @@ jobs:
             next/target/${{ matrix.target }}/release/nexsearch-maintenance
           if-no-files-found: error
           retention-days: 14
+  mac_universal:
+    needs: binaries
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: native-Mac*, path: input}
+      - name: Join Intel and Apple Silicon executables
+        run: |
+          mkdir -p output
+          lipo -create input/native-MacIntel/nexsearch input/native-MacArm/nexsearch -output output/NexSearch
+          lipo -create input/native-MacIntel/nexsearch-maintenance input/native-MacArm/nexsearch-maintenance -output 'output/NexSearch Maintenance'
+          codesign --force --sign - output/NexSearch
+          codesign --force --sign - 'output/NexSearch Maintenance'
+          lipo -verify_arch x86_64 arm64 output/NexSearch
+          lipo -verify_arch x86_64 arm64 'output/NexSearch Maintenance'
+          ./output/NexSearch --self-check
+      - uses: actions/upload-artifact@v4
+        with: {name: native-EmployeeMac, path: output, if-no-files-found: error, retention-days: 14}
+  ubuntu_transition:
+    needs: binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: native-HostUbuntu, path: candidate}
+      - name: Prepare isolated systemd acceptance VM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql postgresql-contrib python3-venv
+          sudo systemctl start postgresql
+          python -m venv "$RUNNER_TEMP/acceptance"
+          "$RUNNER_TEMP/acceptance/bin/pip" install -r network/requirements.txt
+          git fetch --depth=1 origin tag v1.6.7
+          git show v1.6.7:ubuntu/updater.py > "$RUNNER_TEMP/legacy-updater.py"
+      - name: Exercise the actual old updater and native systemd service
+        run: sudo env GITHUB_ACTIONS=true "$RUNNER_TEMP/acceptance/bin/python" next/tools/test-systemd-transition.py candidate/nexsearch-host "$RUNNER_TEMP/legacy-updater.py"
+      - if: failure()
+        run: sudo journalctl -u nexsearch -n 100 --no-pager

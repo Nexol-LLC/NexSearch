@@ -12,6 +12,8 @@ pub struct SavedSession {
     pub profile: Option<Value>,
     #[serde(default)]
     pub endpoint: Option<String>,
+    #[serde(default)]
+    pub connection_preference: String,
 }
 pub struct SessionStore {
     path: PathBuf,
@@ -190,6 +192,7 @@ mod tests {
             token: Some("private-local-test-token".into()),
             profile: None,
             endpoint: Some("https://127.0.0.1:8743".into()),
+            connection_preference: "auto".into(),
         };
         store.save(&value).unwrap();
         assert_eq!(store.load().unwrap().unwrap().token, value.token);
