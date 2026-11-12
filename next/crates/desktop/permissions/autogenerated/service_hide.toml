@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-service-hide"
+description = "Enables the service_hide command without any pre-configured scope."
+commands.allow = ["service_hide"]
+
+[[permission]]
+identifier = "deny-service-hide"
+description = "Denies the service_hide command without any pre-configured scope."
+commands.deny = ["service_hide"]

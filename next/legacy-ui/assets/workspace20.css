@@ -1,0 +1,35 @@
+.personal-grid20{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.7fr);gap:18px}.personal-card20{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:20px;margin-bottom:16px}.personal-card20 h3{margin:0 0 12px}.personal-card20 p,.personal-card20 small{color:var(--muted)}.personal-card20 textarea{min-height:82px}.personal-card20 label{display:flex;flex-direction:column;gap:7px;margin:14px 0}.personal-card20 input[type=color]{width:70px;height:40px;padding:4px}.personal-service20{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.personal-service20 strong,.personal-service20 small{display:block;overflow-wrap:anywhere}.personal-actions20{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.recommendation-grid20{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.recommendation-card20{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:20px}.recommendation-card20 h3{font-size:15px;margin:0 0 8px}.recommendation-card20 small,.recommendation-card20 p{color:var(--muted)}.recommendation-card20 ul{padding-left:18px;font-size:12px;line-height:1.8;color:var(--text-2)}.recommendation-score20{float:right;background:var(--accent-soft);color:var(--accent-text);border-radius:6px;padding:4px 8px;font-size:11px}.profiles20{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}.profiles20 article{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:10px}.profiles20 p{color:var(--muted);font-size:12px}.personal-note20{padding:13px 16px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:12px;margin:15px 0}.primary{color:var(--on-accent20,#fff)}@media(max-width:1150px){.personal-grid20,.recommendation-grid20{grid-template-columns:1fr}.profiles20{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+#editor.service-add-dialog20{width:440px;max-width:calc(100vw - 28px)}#editor.service-add-dialog20 #editor-form{padding:24px}#editor.service-add-dialog20 .dialog-head{margin-bottom:8px}
+
+/* Keep the familiar workspace, with more useful content at laptop sizes. */
+#workspace{--nav-width20:216px}
+#workspace .sidebar{width:var(--nav-width20);padding:16px 12px 12px}
+#workspace .content{margin-left:var(--nav-width20);min-width:0}
+#workspace .brand{padding-bottom:16px}
+#workspace .nav-group162{gap:2px;margin-bottom:8px}
+#workspace .sidebar .nav-caption{margin-top:8px;margin-bottom:6px}
+#workspace .sidebar nav button{min-height:38px;padding:8px 11px}
+#workspace .topbar{height:56px;padding:0 24px}
+#workspace main{padding:24px}
+#workspace .heading{margin-bottom:16px}
+#workspace .heading h1{font-size:26px}
+#workspace .dashboard-grid{gap:12px}
+#workspace .dashboard-grid article{padding:18px 20px}
+#workspace .dashboard-grid article strong{font-size:30px;margin:8px 0 5px}
+#workspace .task-card,#workspace .loading-card{padding:15px 18px;gap:12px}
+#workspace .toolbar{flex-wrap:wrap;row-gap:8px;padding-top:8px;padding-bottom:12px}
+#workspace .toolbar input[type=search]{min-width:190px;max-width:100%}
+#workspace button,#workspace .button{transition:background-color .12s ease,border-color .12s ease,color .12s ease}
+#workspace .table-scroll{overscroll-behavior:contain;scrollbar-gutter:stable}
+#workspace .kanban-column{min-width:0}
+#workspace select option,#workspace select optgroup{background:var(--surface);color:var(--text)}
+.personal-card20{padding:16px;margin-bottom:12px}
+.personal-grid20,.recommendation-grid20{gap:12px}
+.recommendation-card20{padding:16px}
+html[data-density=compact] #workspace main{padding:18px 20px}
+html[data-density=compact] #workspace .topbar{height:50px}
+html[data-density=compact] #workspace .sidebar nav button{min-height:34px;padding-top:6px;padding-bottom:6px}
+html[data-density=compact] #workspace .task-card{padding:11px 14px}
+@media(max-width:1100px){#workspace{--nav-width20:204px}#workspace .topbar{padding:0 18px}#workspace main{padding:20px}}
+@media(max-width:760px){#workspace .sidebar{width:auto}#workspace .content{margin-left:0}#workspace .topbar{padding:0 14px}#workspace main{padding:18px 14px}}

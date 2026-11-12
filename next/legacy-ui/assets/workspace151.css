@@ -1,0 +1,7 @@
+.working-contacts151{margin-top:22px;padding:18px;border:1px solid #e5dff0;border-radius:12px;background:#faf8fe}
+.working-contacts151 h3{margin:0 0 8px;font-size:15px}
+.working-contacts151 textarea{min-height:82px}
+.working-contacts-actions151{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+#contacts-state151{font-size:12px;color:#397255}
+.dashboard-grid.tasks-only151{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:560px){.working-contacts151 .form-grid{grid-template-columns:1fr}.working-contacts151{padding:12px}}

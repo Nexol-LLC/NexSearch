@@ -173,7 +173,7 @@ def create_app(database=None,web=None,pack=None,start_worker=True):
              revision=revision+1,updated_at=now() WHERE id=%s RETURNING *''',(body.name,body.contacts,body.routes,body.description,user['id'],ident)).fetchone()
     @app.get('/api/plans')
     def plans(user=Depends(employee)):
-        with db.transaction(user['id']) as conn:return {'plans':conn.execute('SELECT id,name,revision,updated_at FROM loading_plans ORDER BY updated_at DESC').fetchall()}
+        with db.transaction(user['id']) as conn:return {'plans':conn.execute('SELECT id,name,revision,updated_at FROM loading_plans WHERE employee_id=%s ORDER BY updated_at DESC',(user['id'],)).fetchall()}
     @app.get('/api/plans/{ident}')
     def plan(ident:UUID,user=Depends(employee)):
         with db.transaction(user['id']) as conn:

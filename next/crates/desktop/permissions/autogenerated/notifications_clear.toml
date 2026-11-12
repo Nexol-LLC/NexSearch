@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-notifications-clear"
+description = "Enables the notifications_clear command without any pre-configured scope."
+commands.allow = ["notifications_clear"]
+
+[[permission]]
+identifier = "deny-notifications-clear"
+description = "Denies the notifications_clear command without any pre-configured scope."
+commands.deny = ["notifications_clear"]

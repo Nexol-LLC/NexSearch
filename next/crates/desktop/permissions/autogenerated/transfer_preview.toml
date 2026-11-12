@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-transfer-preview"
+description = "Enables the transfer_preview command without any pre-configured scope."
+commands.allow = ["transfer_preview"]
+
+[[permission]]
+identifier = "deny-transfer-preview"
+description = "Denies the transfer_preview command without any pre-configured scope."
+commands.deny = ["transfer_preview"]

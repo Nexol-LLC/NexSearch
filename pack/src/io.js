@@ -17,7 +17,7 @@ function importFile(file, done, fail) {
           name: String(r[0] ?? ''), L: r[1], W: r[2], H: r[3],
           weight: r[4], qty: r[5] ?? 1,
           tiers: r[6] === undefined || r[6] === '' ? 1 : Math.max(1, +r[6] || 1),
-          rotatable: r[7] === undefined ? true : !!+r[7],
+          rotatable: cargoRotationAllowed(r[7]),
           group: r[8] === undefined ? '' : String(r[8]),
         }));
       }
@@ -30,6 +30,12 @@ function importFile(file, done, fail) {
 }
 
 /* Свои шаблоны транспорта — localStorage */
+async function savePackFile20(data,name,type='application/octet-stream'){
+  const blob=data instanceof Blob?data:new Blob([data],{type});
+  const native=window.parent.NexDesktop;
+  if(native?.saveFile)return native.saveFile(new Uint8Array(await blob.arrayBuffer()),name);
+  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return true;
+}
 const LS_KEY = 'packontruck_custom_vehicles';
 
 function loadCustomVehicles() {

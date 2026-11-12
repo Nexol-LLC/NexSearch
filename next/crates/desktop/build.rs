@@ -1,0 +1,25 @@
+fn main() {
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "legacy_request",
+            "open_external",
+            "save_file",
+            "export_pdf",
+            "quit_app",
+            "system_info",
+            "copy_text",
+            "service_show",
+            "service_hide",
+            "service_bounds",
+            "service_reload",
+            "service_back",
+            "workspace_get",
+            "workspace_save",
+            "workspace_recommendations",
+            "custom_service_show",
+            "notify_employee",
+            "notifications_clear",
+        ]),
+    ))
+    .expect("Не удалось подготовить настольное приложение");
+}

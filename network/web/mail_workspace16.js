@@ -45,7 +45,33 @@ loadMailItems16=async()=>{const seq=++mailWS16.sequence,ticket=mailRequest16,acc
  if(seq!==mailWS16.sequence||ticket!==mailRequest16||view!=='mail'||account!==mailAccount16||folder!==mailFolder16||query!==mailQuery16||!$('#mail-items16'))return;
  mailItems16=data.messages;mailWS16.selected=new Set([...mailWS16.selected].filter(id=>mailItems16.some(m=>m.id===id)));mailRowsDraw16();$('#mail-older16').disabled=!data.messages.length;$('#mail-older16').textContent='Загрузить более ранние';
 };
-async function syncVisibleMail16(){const account=mailAccount16,folder=mailFolder16,button=$('#mail-sync16');if(!account||button?.disabled)return;button.disabled=true;$('#mail-sync-status16').textContent='Проверяем новые письма…';try{await api('/api/mail/accounts/'+account+'/sync',{method:'POST',body:JSON.stringify({folder})});if(view==='mail'&&account===mailAccount16&&folder===mailFolder16){await loadMail16();await refreshNotifications16()}}finally{if(button?.isConnected)button.disabled=false}}
+const mailSyncRequests16=new Map();
+async function syncVisibleMail16(){
+ const account=mailAccount16,folder=mailFolder16,button=$('#mail-sync16');if(!account||button?.disabled||mailSyncRequests16.has(account))return;
+ const controller=new AbortController(),request={controller};mailSyncRequests16.set(account,request);
+ const status=()=>view==='mail'&&account===mailAccount16&&folder===mailFolder16?$('#mail-sync-status16'):null;
+ if(button)button.disabled=true;if(status())status().textContent='Проверяем новые письма…';
+ const timer=setTimeout(()=>controller.abort(),100000);
+ try{
+  const result=await api('/api/mail/accounts/'+account+'/sync',{method:'POST',body:JSON.stringify({folder}),signal:controller.signal});
+  if(status()){
+   const error=$('#mail-inline-error16');if(error){error.hidden=true;error.textContent=''}
+   await loadMail16();await refreshNotifications16();
+   if(result.syncing&&status())status().textContent='Проверка уже идёт на хосте. Результат появится автоматически.';
+  }
+ }catch(error){
+  if(status()){
+   // Older hosts still return 409 when automatic and manual checks overlap.
+   if(error.status===409&&/синхрониз|обновля|подключения заняты/i.test(error.message)){
+    const inline=$('#mail-inline-error16');if(inline){inline.hidden=true;inline.textContent=''}
+    status().textContent='Проверка идёт на хосте. Результат появится автоматически.';return;
+   }
+   status().textContent='Проверка не завершена. Можно повторить.';
+   if(error.name==='AbortError')throw Error('Проверка заняла слишком много времени. Попробуйте ещё раз.');
+   throw error;
+  }
+ }finally{clearTimeout(timer);if(mailSyncRequests16.get(account)===request)mailSyncRequests16.delete(account);if(button?.isConnected)button.disabled=false}
+}
 async function markSelectedMail16(seen){const ids=[...mailWS16.selected];if(!ids.length)return;try{await api('/api/mail/accounts/'+mailAccount16+'/mark',{method:'POST',body:JSON.stringify({ids,seen})});mailWS16.selected.clear();await loadMail16();await refreshNotifications16()}catch(e){mailError16(e)}}
 
 const mailBodyBeforeRich16=mailBody16,bindMailBeforeRich16=bindMailBody16;
@@ -93,4 +119,4 @@ loadOlderMail16=async()=>{const button=$('#mail-older16'),account=mailAccount16,
   const known=new Set(mailItems16.map(m=>m.id));mailItems16.push(...data.messages.filter(m=>!known.has(m.id)));mailRowsDraw16();button.textContent=data.messages.length?'Загрузить более ранние':'Более ранних писем нет';button.disabled=!data.messages.length;
  }catch(error){if(button.isConnected){button.disabled=false;button.textContent='Повторить загрузку'}throw error}};
 
-const signOutBeforeMailWorkspace16=signOut;signOut=()=>{++mailWS16.accountsSequence;++mailWS16.sequence;mailWS16.account='';mailWS16.folder='';mailWS16.message=null;mailWS16.selected.clear();mailWS16.unread=false;mailWS16.alerts='all';signOutBeforeMailWorkspace16()};
+const signOutBeforeMailWorkspace16=signOut;signOut=()=>{for(const request of mailSyncRequests16.values())request.controller.abort();mailSyncRequests16.clear();++mailWS16.accountsSequence;++mailWS16.sequence;mailWS16.account='';mailWS16.folder='';mailWS16.message=null;mailWS16.selected.clear();mailWS16.unread=false;mailWS16.alerts='all';signOutBeforeMailWorkspace16()};

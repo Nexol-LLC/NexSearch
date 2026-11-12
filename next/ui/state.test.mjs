@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {Navigation,searchCriteria,escapeHtml} from './state.mjs';
+test('late clients response cannot enter carriers or a later clients generation',()=>{const n=new Navigation(),old=n.navigate('clients');n.navigate('carriers');assert.equal(n.accepts(old),false);n.navigate('clients');assert.equal(n.accepts(old),false)});
+test('criteria limit is 50 and revenue ranges do not overlap',()=>{for(const count of [0,51,-1,1.5,'bad'])assert.throws(()=>searchCriteria({count}));assert.equal(searchCriteria({count:50}).count,50);assert.deepEqual(searchCriteria({count:10,revenue:'medium'}).revenue_min,100e6);assert.throws(()=>searchCriteria({count:10,inn:'x'}))});
+test('untrusted company and mail text cannot become executable markup',()=>{assert.equal(escapeHtml('<img onerror="attack()">'), '&lt;img onerror=&quot;attack()&quot;&gt;');assert.equal(escapeHtml(undefined),'')});
