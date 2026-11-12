@@ -1,0 +1,4 @@
+/target/
+/local-data/
+*.log
+/crates/desktop/gen/

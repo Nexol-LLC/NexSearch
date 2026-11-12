@@ -1,0 +1,168 @@
+name: Native 2.0 migration candidate
+on:
+  workflow_dispatch:
+  push:
+    branches: ['next/2.0-rust', host, employe]
+    paths-ignore: ['.updates/**', '**/*.md']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.policy.outputs.enabled }}
+      host_tip: ${{ steps.policy.outputs.host_tip }}
+      employe_tip: ${{ steps.policy.outputs.employe_tip }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: policy
+        run: |
+          python - <<'PY'
+          import json,os,subprocess
+          mode=json.load(open('.github/release-channel.json'))['mode']
+          assert mode in ('source-only','native-release')
+          refs=subprocess.check_output(['git','ls-remote','origin','refs/heads/host','refs/heads/employe'],text=True)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('enabled='+str(mode=='native-release').lower()+'\n')
+              for line in refs.splitlines():
+                  sha,ref=line.split();out.write(ref.rsplit('/',1)[1]+'_tip='+sha+'\n')
+          PY
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            role: EmployeeWindows
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            role: HostUbuntu
+          - os: macos-15
+            target: aarch64-apple-darwin
+            role: MacArm
+          - os: macos-15
+            target: x86_64-apple-darwin
+            role: MacIntel
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        working-directory: next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: rustup toolchain install nightly-2026-11-10 --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            next/target
+          key: native-${{ matrix.target }}-${{ hashFiles('next/Cargo.lock') }}
+          restore-keys: native-${{ matrix.target }}-
+      - run: cargo fmt --all --check
+      - run: node tools/verify-ui.mjs
+      - run: node --test tools/*.test.mjs ../pack/tests/*.test.cjs ui/state.test.mjs
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build real native application and installer
+        run: cargo build --release --locked --target ${{ matrix.target }} -p nexsearch-desktop -p nexsearch-host -p nexsearch-updates
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.role }}
+          path: |
+            next/target/${{ matrix.target }}/release/nexsearch.exe
+            next/target/${{ matrix.target }}/release/nexsearch-maintenance.exe
+            next/target/${{ matrix.target }}/release/nexsearch
+            next/target/${{ matrix.target }}/release/nexsearch-host
+            next/target/${{ matrix.target }}/release/nexsearch-maintenance
+          if-no-files-found: error
+          retention-days: 14
+  mac_universal:
+    needs: binaries
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: native-Mac*, path: input}
+      - name: Join Intel and Apple Silicon executables
+        run: |
+          mkdir -p output
+          lipo -create input/native-MacIntel/nexsearch input/native-MacArm/nexsearch -output output/NexSearch
+          lipo -create input/native-MacIntel/nexsearch-maintenance input/native-MacArm/nexsearch-maintenance -output 'output/NexSearch Maintenance'
+          chmod +x output/NexSearch 'output/NexSearch Maintenance'
+          codesign --force --sign - output/NexSearch
+          codesign --force --sign - 'output/NexSearch Maintenance'
+          lipo output/NexSearch -verify_arch x86_64 arm64
+          lipo 'output/NexSearch Maintenance' -verify_arch x86_64 arm64
+          ./output/NexSearch --self-check
+          arch -x86_64 ./output/NexSearch --self-check
+      - uses: actions/upload-artifact@v4
+        with: {name: native-EmployeeMac, path: output, if-no-files-found: error, retention-days: 14}
+  ubuntu_transition:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Prepare isolated systemd acceptance VM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql postgresql-contrib python3-venv
+          sudo systemctl start postgresql
+          python -m venv "$RUNNER_TEMP/acceptance"
+          "$RUNNER_TEMP/acceptance/bin/pip" install -r network/requirements.txt
+          git fetch --depth=1 origin tag v1.6.7
+          git show v1.6.7:ubuntu/updater.py > "$RUNNER_TEMP/legacy-updater.py"
+      - name: Wait for this run's signed-input host binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 40); do
+            if gh run download "$GITHUB_RUN_ID" --name native-HostUbuntu --dir candidate; then exit 0; fi
+            sleep 15
+          done
+          echo 'The native host build did not produce its artifact in time.' >&2
+          exit 1
+      - name: Exercise the actual old updater and native systemd service
+        run: sudo env GITHUB_ACTIONS=true "$RUNNER_TEMP/acceptance/bin/python" next/tools/test-systemd-transition.py candidate/nexsearch-host "$RUNNER_TEMP/legacy-updater.py"
+      - if: failure()
+        run: sudo journalctl -u nexsearch -n 100 --no-pager
+  publish:
+    needs: [policy, binaries, mac_universal, ubuntu_transition]
+    if: needs.policy.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: native-*, path: input}
+      - run: pip install 'cryptography>=43,<47' pytest
+      - run: python -m pytest next/tools/test_native_packaging.py network/tests/test_native_mac_schedule.py -q
+      - name: Sign, verify with 1.6.7, and atomically promote both branches
+        id: promote
+        env:
+          NEXSEARCH_SIGNING_KEY: ${{ secrets.NEXSEARCH_SIGNING_KEY }}
+          EXPECTED_HOST_TIP: ${{ needs.policy.outputs.host_tip }}
+          EXPECTED_EMPLOYE_TIP: ${{ needs.policy.outputs.employe_tip }}
+        run: python next/tools/publish-native.py --input input --promote
+      - name: Publish downloadable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.promote.outputs.release_commit }}
+        run: |
+          version=$(python -c "import json; print(json.load(open('version.json'))['version'])")
+          gh release create "v$version" .updates/*.zip --target "$RELEASE_COMMIT" --title "NexSearch $version — Rust и Tauri" --notes-file next/RELEASE-2.0.md

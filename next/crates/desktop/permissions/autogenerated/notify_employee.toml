@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-notify-employee"
+description = "Enables the notify_employee command without any pre-configured scope."
+commands.allow = ["notify_employee"]
+
+[[permission]]
+identifier = "deny-notify-employee"
+description = "Denies the notify_employee command without any pre-configured scope."
+commands.deny = ["notify_employee"]

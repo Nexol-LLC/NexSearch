@@ -10,7 +10,32 @@ concurrency:
   group: nexsearch-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  release_gate:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.policy.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check source and package publication mode
+        id: policy
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('.github/release-channel.json')
+          policy = json.loads(path.read_text()) if path.exists() else {'mode': 'legacy-release'}
+          mode = policy.get('mode')
+          if mode not in ('source-only', 'legacy-release', 'native-release'):
+              raise SystemExit('Unknown release mode; refusing to publish packages')
+          enabled = mode == 'legacy-release'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('enabled=' + str(enabled).lower() + '\n')
+          if not enabled:
+              print('::notice::Legacy builder disabled. Native releases use native-candidate.yml. ' + policy.get('reason', ''))
+          PY
   source:
+    needs: release_gate
+    if: needs.release_gate.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +67,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: {name: signed-source, path: '${{ steps.sign.outputs.path }}', include-hidden-files: true, if-no-files-found: error}
   windows:
-    if: github.ref_name == 'employe'
+    needs: release_gate
+    if: needs.release_gate.outputs.enabled == 'true' && github.ref_name == 'employe'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

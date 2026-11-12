@@ -11,7 +11,8 @@ function addAdvancedRow(row,data){row.dataset.extra=JSON.stringify({cg:data.cg||
 const originalAddCargo=addCargoRow,originalReadCargo=readCargo;
 addCargoRow=data=>{originalAddCargo(data);addAdvancedRow($('cargoRows').lastElementChild,data||{})};
 readCargo=()=>{const values=originalReadCargo();for(let i=0,j=0;i<$('cargoRows').children.length;i++){const row=$('cargoRows').children[i];if(!+row.querySelector('.c-l').value||!+row.querySelector('.c-w').value||!+row.querySelector('.c-h').value)continue;Object.assign(values[j++],JSON.parse(row.dataset.extra||'{}'))}return values};
-function modal14(title,html,save){const dialog=$('advanced-dialog');$('advanced-title').textContent=title;$('advanced-body').innerHTML=html;$('advanced-error').textContent='';$('advanced-save').hidden=!save;dialog.showModal();$('advanced-form').onsubmit=e=>{e.preventDefault();try{if(save)save();dialog.close()}catch(error){$('advanced-error').textContent=error.message}}}
+let advancedRevision20=0;
+function modal14(title,html,save){const dialog=$('advanced-dialog'),revision=++advancedRevision20;$('advanced-title').textContent=title;$('advanced-body').innerHTML=html;$('advanced-error').textContent='';$('advanced-save').hidden=!save;$('advanced-save').disabled=false;dialog.showModal();$('advanced-form').onsubmit=async e=>{e.preventDefault();$('advanced-save').disabled=true;try{if(save)await save();if(revision===advancedRevision20&&dialog.open)dialog.close()}catch(error){if(revision===advancedRevision20&&dialog.open)$('advanced-error').textContent=error.message}finally{if(revision===advancedRevision20)$('advanced-save').disabled=false}}}
 function editCargoPhysics(row){const extra=JSON.parse(row.dataset.extra||'{}'),cg=extra.cg||[.5,.5,.5];modal14('Параметры грузового места',`<p class="hint">Центр массы задаётся в процентах от размеров исходного места, до поворота. 50% соответствует середине.</p><div class="advanced-grid">${['Длина','Ширина','Высота'].map((name,i)=>`<label>${name}, %<input id="cargo-cg-${i}" type="number" min="0" max="100" step="any" value="${cg[i]*100}" required></label>`).join('')}</div><label>Порядок выгрузки<input id="cargo-stop" type="number" min="1" max="100" value="${extra.stop||1}" required></label><label><input id="cargo-vertical" type="checkbox" ${extra.verticalRotation?'checked':''}>Разрешено менять вертикальную ориентацию при авторасчёте</label><p class="hint">Включайте для грузов, которые допускают такую перевозку.</p>`,()=>{rememberEdit();row.dataset.extra=JSON.stringify({cg:[0,1,2].map(i=>+$('cargo-cg-'+i).value/100),stop:+$('cargo-stop').value,verticalRotation:$('cargo-vertical').checked});currentItems=readCargo();for(const b of project.boxes)if(currentItems[b.item.ci])b.item=currentItems[b.item.ci];refreshAll()})}
 function floorRow14(s={}){return `<tr data-floor><td><input class="floor-x" type="number" value="${s.x??0}" required></td><td><input class="floor-y" type="number" value="${s.y??0}" required></td><td><input class="floor-l" type="number" min="1" value="${s.l??1000}" required></td><td><input class="floor-w" type="number" min="1" value="${s.w??2000}" required></td><td><input class="floor-z" type="number" min="0" value="${s.z??0}" required></td><td><button type="button" class="remove-floor">×</button></td></tr>`}
 function blockedRow14(s={}){return `<tr data-blocked>${['x','y','l','w'].map(k=>`<td><input class="blocked-${k}" type="number" ${['l','w'].includes(k)?'min="1"':''} value="${s[k]??(['l','w'].includes(k)?500:0)}" required></td>`).join('')}<td><button type="button" class="remove-blocked">×</button></td></tr>`}
@@ -44,39 +45,43 @@ window.addEventListener('DOMContentLoaded',()=>{
 });
 
 sceneSetAxleLoads=loadsBySec=>{
- for(const child of [..._labelGroup.children]){child.traverse(o=>{o.material?.map?.dispose();o.material?.dispose()});_labelGroup.remove(child)}
- for(const [section,value] of Object.entries(loadsBySec||{})){
-  const zone=_zones.find(z=>z.kind==='sec'&&z.idx===+section);if(!zone)continue;
+ const groups=new Map(),rows=[],size=Math.max(.38,(_vehicleBounds.maxX-_vehicleBounds.minX+3)/Math.max(1,_canvasEl.clientWidth)*18);
+ for(const box of project.boxes){if(box.zone.type!=='truck')continue;const key=box.zone.truck+':'+box.zone.section;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({...box,weight:box.item.weight})}
+ for(const zone of _zones.filter(z=>z.kind==='sec')){
+  const section=zone.idx,vehicle=project.trucks[zone.truck]?.vehicle;if(!vehicle)continue;
+  const value=zone.truck===project.cur&&loadsBySec?.[section]?loadsBySec[section]:grossAxleLoads(zone.section,computeStats(zone.section,groups.get(zone.truck+':'+section)||[]));
   const layout=zone.axleLayout;if(!layout)continue;
   for(const axis of layout.axles){
    const calculated=value.available?value.axles.find(a=>a.kind===axis.kind&&a.id===axis.id):null;
    const load=calculated?(calculated.kg/1000).toFixed(2)+' т':'—';
    const color=calculated?.over||calculated?.unstable?'#b9465d':calculated?'#426d5c':'#67768b';
-   const size=Math.max(.38,(_vehicleBounds.maxX-_vehicleBounds.minX+3)/Math.max(1,_canvasEl.clientWidth)*18);
-   const label=new THREE.Group(),code=makeTextSprite(axis.code,color,size);label.add(code);const text=makeTextSprite(load,color,size*1.1);
    const nearest=Math.min(...layout.axles.filter(a=>a!==axis&&a.kind===axis.kind).map(a=>Math.abs(a.x-axis.x)/1000),1.5);
-   text.scale.x=Math.min(text.scale.x,nearest*.88);text.position.y=-size;label.add(text);
-   label.position.set(zone.x0+axis.x/1000,layout.groundY/1000-.28,-.28);
-   label.traverse(o=>{if(o.material)o.material.depthTest=false;o.renderOrder=1001});label.userData={axleCode:axis.code,axisId:axis.id};_labelGroup.add(label);
+   rows.push({code:axis.code,id:axis.id,truck:zone.truck,load,color,nearest,x:zone.x0+axis.x/1000,y:layout.groundY/1000-.28,z:zone.z0-.28});
   }
+ }
+ const key=JSON.stringify([size,rows]);if(key===_axleLabelKey20)return;_axleLabelKey20=key;disposeSceneTree20(_labelGroup);
+ for(const row of rows){
+   const {code:axisCode,load,color,nearest,x,y,z}=row,label=new THREE.Group(),code=makeTextSprite(axisCode,color,size);label.add(code);const text=makeTextSprite(load,color,size*1.1);
+   text.scale.x=Math.min(text.scale.x,nearest*.88);text.position.y=-size;label.add(text);
+   label.position.set(x,y,z);
+   label.traverse(o=>{if(o.material)o.material.depthTest=false;o.renderOrder=1001});label.userData={axleCode:axisCode,axisId:row.id,truck:row.truck};_labelGroup.add(label);
  }
  sceneRender();
 };
 const renderPerspective14=sceneRender;
 let cameraMode14='3d',perspective14=null;
-function sceneView14(mode){if(!perspective14)perspective14=_camera;cameraMode14=mode;if(mode==='3d')_camera=perspective14;else{const aspect=_canvasEl.clientWidth/_canvasEl.clientHeight,span=Math.max(8,_orbit.dist*.6);_camera=new THREE.OrthographicCamera(-span*aspect/2,span*aspect/2,span/2,-span/2,.05,500)};for(const name of ['3d','top','side'])$('view-'+name)?.classList.toggle('active',name===mode);sceneRender()}
+function sceneView14(mode){stopCameraFlight20();if(!perspective14)perspective14=_camera;cameraMode14=mode;if(mode==='3d')_camera=perspective14;else{const aspect=_canvasEl.clientWidth/_canvasEl.clientHeight,span=Math.max(8,_orbit.dist*.6);_camera=new THREE.OrthographicCamera(-span*aspect/2,span*aspect/2,span/2,-span/2,.05,500)};for(const name of ['3d','top','side'])$('view-'+name)?.classList.toggle('active',name===mode);_orbit.dist=fitBoundsDistance20(_vehicleBounds,_orbit.target);sceneRender()}
 sceneRender=()=>{
  if(cameraMode14==='3d'){renderPerspective14();return}
- const t=_orbit.target,b=_vehicleBounds,d=Math.max(20,_orbit.dist),aspect=_canvasEl.clientWidth/_canvasEl.clientHeight;
- let span=Math.max((b.maxX-b.minX+3)/aspect,b.maxY-b.minY+2);
+ const t=_orbit.target,d=Math.max(20,_orbit.dist),aspect=_canvasEl.clientWidth/_canvasEl.clientHeight;
+ const span=Math.max(2,_orbit.dist*2*Math.tan(Math.PI/8));
  if(cameraMode14==='top'){
   _camera.position.set(t.x,d,t.z);_camera.up.set(0,0,-1);
-  span=Math.max(span,b.W+2*(WH_GAP+WH_DEPTH/1000)+1);
   _camera.lookAt(t);
  }else{
-  const midY=(b.minY+b.maxY)/2;
+  const midY=t.y;
   _camera.position.set(t.x,midY,t.z+d);_camera.up.set(0,1,0);_camera.lookAt(new THREE.Vector3(t.x,midY,t.z));
  }
  _camera.left=-span*aspect/2;_camera.right=span*aspect/2;_camera.top=span/2;_camera.bottom=-span/2;
- _camera.updateProjectionMatrix();_renderer.render(_scene,_camera);
+ _camera.far=Math.max(500,d*3+100);_camera.updateProjectionMatrix();_renderer.render(_scene,_camera);
 };

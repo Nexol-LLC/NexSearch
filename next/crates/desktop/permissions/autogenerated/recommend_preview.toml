@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recommend-preview"
+description = "Enables the recommend_preview command without any pre-configured scope."
+commands.allow = ["recommend_preview"]
+
+[[permission]]
+identifier = "deny-recommend-preview"
+description = "Denies the recommend_preview command without any pre-configured scope."
+commands.deny = ["recommend_preview"]

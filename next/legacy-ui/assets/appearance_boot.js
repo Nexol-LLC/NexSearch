@@ -1,0 +1,2 @@
+/* Set the saved palette before first paint; storage may be disabled by policy. */
+try{const prefs=JSON.parse(localStorage.getItem('nexsearch.appearance.last')||'{}');document.documentElement.dataset.theme=prefs.theme==='dark'?'dark':'light';document.documentElement.dataset.density=prefs.density==='compact'?'compact':'comfortable';document.documentElement.dataset.motion=prefs.motion===false?'reduced':'normal'}catch{document.documentElement.dataset.theme='light'}

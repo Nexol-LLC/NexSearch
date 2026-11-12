@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "source_commit": "f94449ff59fb076366750843b5cf8e8d196bf7f1",
+  "packages": {
+    "employee-mac-local.zip": {
+      "role": "EmployeeMac",
+      "runtime": "rust"
+    },
+    "employee-mac.zip": {
+      "role": "EmployeeMac",
+      "runtime": "rust"
+    },
+    "employee-windows-local.zip": {
+      "role": "EmployeeWindows",
+      "runtime": "rust"
+    },
+    "employee-windows.zip": {
+      "role": "EmployeeWindows",
+      "runtime": "rust"
+    },
+    "host-linux.zip": {
+      "role": "HostUbuntu",
+      "runtime": "rust-transition"
+    },
+    "host-office-connect.zip": {
+      "role": "OfficeTunnel"
+    }
+  }
+}

@@ -21,6 +21,68 @@ let _selectedId = null;
 let _api = {};             // { onSelect(id), onDrop(box), boxesVisible() }
 let _drag = null;          // {box, mesh, offX, offZ, plane}
 let _raycaster, _mouse;
+let _sceneGeometryKey20='',_sceneRecords20=[],_sceneActive20=-1,_cameraFlight20=0,_cameraFlightSerial20=0,_buildingWorld20=false,_axleLabelKey20='';
+function stopCameraFlight20(){_cameraFlightSerial20++;if(_cameraFlight20)cancelAnimationFrame(_cameraFlight20);_cameraFlight20=0}
+function fitBoundsDistance20(bounds,target){
+ const side=WH_GAP+WH_DEPTH/1000;
+ if(typeof cameraMode14!=='undefined'&&cameraMode14!=='3d'){
+  const aspect=_canvasEl.clientWidth/_canvasEl.clientHeight,depth=(bounds.maxZ??bounds.W)-(bounds.minZ??0);
+  const span=Math.max((bounds.maxX-bounds.minX+2)/aspect,cameraMode14==='top'?depth+side*2:bounds.maxY-(bounds.minY??-1.5)+2);
+  return span/(2*Math.tan(Math.PI/8))*1.12;
+ }
+ const outward=new THREE.Vector3(Math.sin(_orbit.phi)*Math.cos(_orbit.theta),Math.cos(_orbit.phi),Math.sin(_orbit.phi)*Math.sin(_orbit.theta));
+ const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),outward).normalize(),up=new THREE.Vector3().crossVectors(outward,right);
+ const tangent=Math.tan((_camera.fov||45)*Math.PI/360),horizontal=tangent*(_camera.aspect||1),margin=1.12;let distance=2;
+ for(const x of [bounds.minX,bounds.maxX])for(const y of [bounds.minY??-1.5,bounds.maxY])for(const z of [(bounds.minZ??0)-side,(bounds.maxZ??bounds.W)+side]){
+  const point=new THREE.Vector3(x,y,z).sub(target),depth=point.dot(outward);
+  distance=Math.max(distance,depth+margin*Math.max(Math.abs(point.dot(right))/horizontal,Math.abs(point.dot(up))/tangent));
+ }
+ return distance+1;
+}
+function focusTruck20(index,animate=true){
+ const record=_sceneRecords20[index];if(!record)return;_vehicleBounds={...record};
+ const target=new THREE.Vector3((record.minX+record.maxX)/2,record.maxY/3,(record.minZ+record.maxZ)/2);
+ moveCamera20(target,fitBoundsDistance20(record,target),animate);
+}
+function moveCamera20(target,distance,animate=true){
+ stopCameraFlight20();if(!animate||document.documentElement.dataset.motion==='reduced'||matchMedia('(prefers-reduced-motion: reduce)').matches){_orbit.target.copy(target);_orbit.dist=distance;sceneRender();return}
+ const from=_orbit.target.clone(),oldDist=_orbit.dist,start=performance.now(),serial=_cameraFlightSerial20;
+ // No artificial lift/zoom arc: one monotone move, including a change of vehicle type.
+ const frame=now=>{if(serial!==_cameraFlightSerial20)return;const t=Math.max(0,Math.min(1,(now-start)/520)),ease=t*t*t*(t*(t*6-15)+10);_orbit.target.copy(from).lerp(target,ease);_orbit.dist=oldDist+(distance-oldDist)*ease;sceneRender();_cameraFlight20=t<1?requestAnimationFrame(frame):0};_cameraFlight20=requestAnimationFrame(frame);
+}
+function sceneOverview20(animate=true){
+ if(!_sceneRecords20.length)return;
+ const minX=Math.min(..._sceneRecords20.map(r=>r.minX)),maxX=Math.max(..._sceneRecords20.map(r=>r.maxX)),maxY=Math.max(..._sceneRecords20.map(r=>r.maxY)),minZ=Math.min(..._sceneRecords20.map(r=>r.minZ)),maxZ=Math.max(..._sceneRecords20.map(r=>r.maxZ)),W=maxZ-minZ;
+ _vehicleBounds={minX,maxX,minZ,maxZ,minY:Math.min(..._sceneRecords20.map(r=>r.minY)),maxY,W};const target=new THREE.Vector3((minX+maxX)/2,maxY/3,(minZ+maxZ)/2);moveCamera20(target,fitBoundsDistance20(_vehicleBounds,target),animate);
+}
+function disposeSceneTree20(root){const textures=new Set(),materials=new Set(),geometries=new Set();root.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[]){materials.add(m);if(m.map)textures.add(m.map)}});for(const g of geometries)g.dispose();for(const t of textures)t.dispose();for(const m of materials)m.dispose();root.clear()}
+const _packedModels20=new Map();
+function packedModel20(name,data){
+ if(_packedModels20.has(name))return _packedModels20.get(name);
+ const loading=(async()=>{if(!data||typeof DecompressionStream==='undefined')throw Error('Распаковка модели недоступна');const bytes=Uint8Array.from(atob(data),c=>c.charCodeAt(0));const raw=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+ const view=new DataView(raw);if(raw.byteLength<84)throw Error('Повреждён STL');const count=view.getUint32(80,true);if(count>300000||raw.byteLength!==84+count*50)throw Error('Некорректный размер STL');const positions=new Float32Array(count*9),normals=new Float32Array(count*9);
+ for(let i=0;i<count;i++)for(let vertex=0;vertex<3;vertex++)for(let a=0;a<3;a++){positions[i*9+vertex*3+a]=view.getFloat32(84+i*50+12+vertex*12+a*4,true);normals[i*9+vertex*3+a]=view.getFloat32(84+i*50+a*4,true)}
+ const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));geometry.setAttribute('normal',new THREE.BufferAttribute(normals,3));geometry.computeBoundingBox();return geometry})();
+ _packedModels20.set(name,loading);return loading;
+}
+function originalCab20(parent,front,W,x0,rigid){
+ if(typeof TRACTOR_BODY20==='undefined')return;
+ packedModel20('body',TRACTOR_BODY20.data).then(original=>{
+  if(!parent.parent)return;const geometry=original.clone(),bb=geometry.boundingBox,scale=Math.min(2.5,W*.98)/(bb.max.z-bb.min.z),anchor=TRACTOR_BODY20.frontAxle;
+  const frontX=x0+front.x/1000,backDistance=anchor.x-bb.min.x;
+  const sx=rigid?Math.min(scale,Math.max(.005,(-.08-front.x/1000)/backDistance)):scale;
+  const model=new THREE.Mesh(geometry,new THREE.MeshPhongMaterial({color:0xd9dee5,flatShading:true,shininess:24}));model.name='original-packontruck-body';model.rotation.y=Math.PI;model.scale.set(sx,scale,scale);model.position.set(frontX+anchor.x*sx,front.centerY/1000-anchor.y*scale,W/2+(bb.min.z+bb.max.z)*scale/2);
+  for(const child of [...parent.children])if(child.name!=='tractor-chassis'){child.geometry?.dispose();parent.remove(child)}parent.add(model);sceneRender();
+ }).catch(()=>{});
+}
+function originalAxle20(parent,axis,W,x0){
+ if(typeof AXLE_STL_GZ_B64==='undefined')return;
+ packedModel20('axle',AXLE_STL_GZ_B64).then(original=>{
+  if(!parent.parent)return;const geo=original.clone(),bb=geo.boundingBox,cx=(bb.min.x+bb.max.x)/2,cy=(bb.min.y+bb.max.y)/2,cz=(bb.min.z+bb.max.z)/2,scale=(axis.radius/1000)*2/(bb.max.y-bb.min.y),width=Math.min(W,2.5)/(bb.max.z-bb.min.z);
+  const model=new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0x87929e,flatShading:true,shininess:30}));model.name='original-packontruck-axle';model.scale.set(scale,scale,width);model.position.set(x0+axis.x/1000-cx*scale,axis.centerY/1000-cy*scale,W/2-cz*width);
+  for(const child of parent.children)child.geometry?.dispose();parent.clear();parent.add(model);sceneRender();
+ }).catch(()=>{});
+}
 
 function sceneInit(container, api) {
   _api = api || {};
@@ -45,13 +107,30 @@ function sceneInit(container, api) {
   _cgGroup=new THREE.Group();_scene.add(_cgGroup);
   _orbit.target = new THREE.Vector3(0, 0, 0);
 
-  let orbiting = null;
-  _canvasEl.addEventListener('mousedown', e => {
+  bindSceneInput20();
+  sceneResize(container);
+  window.addEventListener('resize', () => sceneResize(container));
+  new ResizeObserver(() => sceneResize(container)).observe(container);
+  _canvasEl.addEventListener('webglcontextlost',event=>{event.preventDefault();window.NexPackStatus?.('context-lost')});
+  _canvasEl.addEventListener('webglcontextrestored',()=>{sceneResize(container);window.NexPackStatus?.('ready')});
+}
+
+function bindSceneInput20(){
+  let orbiting = null, activePointer = null;
+  const pointer=!!window.PointerEvent;
+  _canvasEl.style.touchAction='none';
+  _canvasEl.addEventListener(pointer?'pointerdown':'mousedown', e => {
+    if(e.isPrimary===false)return;
+    e.preventDefault();
+    activePointer=e.pointerId??null;
+    if(pointer)try{_canvasEl.setPointerCapture(e.pointerId)}catch{}
+    stopCameraFlight20();
     const cg=pickCg(e);
-    if(e.button===0&&cg){const zone=_zones.find(z=>z.kind==='sec'&&z.idx===cg.userData.section);_cgDrag={zone,plane:new THREE.Plane(new THREE.Vector3(0,1,0),-cg.position.y)};return;}
+    if(e.button===0&&cg){const zone=_zones.find(z=>z.kind==='sec'&&z.idx===cg.userData.section&&z.truck===cg.userData.truck);_cgDrag={zone,plane:new THREE.Plane(new THREE.Vector3(0,1,0),-cg.position.y)};return;}
     const hit = pickBox(e);
+    const other=hit&&_boxes.find(b=>b.id===hit.userData.boxId);if(other?.zone.type==='truck'&&other.zone.truck!==_sceneActive20){_api.onActivateTruck?.(other.zone.truck);selectBox(other.id);return;}
     if(hit&&(e.ctrlKey||e.metaKey)){if(_api.onMultiSelect)_api.onMultiSelect(hit.userData.boxId);return;}
-    if (hit && e.button === 0) {
+    if (hit && e.button === 0 && !e.altKey) {
       if(_api.onBeforeMove)_api.onBeforeMove();
       startDrag(hit, e);
     } else {
@@ -59,23 +138,31 @@ function sceneInit(container, api) {
       orbiting = { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey };
     }
   });
-  window.addEventListener('mouseup', () => {
+  const finish=()=>{
     _cgDrag=null;
     if (_drag) endDrag();
     orbiting = null;
-  });
-  window.addEventListener('mousemove', e => {
-    if(_cgDrag){const pt=planePoint(e,_cgDrag.plane);if(pt&&_api.onCgMove)_api.onCgMove(_cgDrag.zone.idx,(pt.x-_cgDrag.zone.x0)*1000,pt.z*1000);return;}
+    const id=activePointer;activePointer=null;
+    if(pointer&&id!==null)try{if(_canvasEl.hasPointerCapture(id))_canvasEl.releasePointerCapture(id)}catch{}
+  };
+  window.addEventListener(pointer?'pointerup':'mouseup',finish);
+  window.addEventListener('blur',finish);
+  if(pointer){window.addEventListener('pointercancel',finish);_canvasEl.addEventListener('lostpointercapture',finish)}
+  window.addEventListener(pointer?'pointermove':'mousemove', e => {
+    if(pointer&&e.pointerId!==activePointer)return;
+    if(_cgDrag){const pt=planePoint(e,_cgDrag.plane);if(pt&&_api.onCgMove)_api.onCgMove(_cgDrag.zone.idx,(pt.x-_cgDrag.zone.x0)*1000,(pt.z-_cgDrag.zone.z0)*1000);return;}
     if (_drag) { moveDrag(e); return; }
     if (!orbiting) return;
     const dx = e.clientX - orbiting.x, dy = e.clientY - orbiting.y;
+    if(!dx&&!dy)return;
     orbiting.x = e.clientX; orbiting.y = e.clientY;
-    if (orbiting.btn === 2 || orbiting.shift) {
+    if (orbiting.btn === 2 || orbiting.btn===1 || orbiting.shift) {
       const s = _orbit.dist * 0.0015;
       const right = new THREE.Vector3().subVectors(_camera.position, _orbit.target)
         .cross(_camera.up).normalize().multiplyScalar(dx * s);
       _orbit.target.add(right).add(new THREE.Vector3(0, dy * s, 0));
     } else {
+      if(typeof cameraMode14!=='undefined'&&cameraMode14!=='3d')sceneView14('3d');
       _orbit.theta -= dx * 0.006;
       _orbit.phi = Math.min(Math.PI - 0.05, Math.max(0.05, _orbit.phi - dy * 0.006));
     }
@@ -83,16 +170,13 @@ function sceneInit(container, api) {
   });
   _canvasEl.addEventListener('wheel', e => {
     e.preventDefault();
-    _orbit.dist = Math.min(150, Math.max(2, _orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+    stopCameraFlight20();
+    const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?_canvasEl.clientHeight:1);
+    _orbit.dist = Math.min(Math.max(150,(_vehicleBounds.maxZ-_vehicleBounds.minZ||0)*3), Math.max(2, _orbit.dist * Math.exp(Math.max(-1000,Math.min(1000,pixels))*.0012)));
     sceneRender();
   }, { passive: false });
   _canvasEl.addEventListener('contextmenu', e => e.preventDefault());
 
-  sceneResize(container);
-  window.addEventListener('resize', () => sceneResize(container));
-  new ResizeObserver(() => sceneResize(container)).observe(container);
-  _canvasEl.addEventListener('webglcontextlost',event=>{event.preventDefault();window.NexPackStatus?.('context-lost')});
-  _canvasEl.addEventListener('webglcontextrestored',()=>{sceneResize(container);window.NexPackStatus?.('ready')});
 }
 
 function sceneResize(container) {
@@ -101,10 +185,13 @@ function sceneResize(container) {
   _renderer.setSize(w, h);
   _camera.aspect = w / h;
   _camera.updateProjectionMatrix();
+  if(typeof perspective14!=='undefined'&&perspective14&&perspective14!==_camera){perspective14.aspect=w/h;perspective14.updateProjectionMatrix()}
   sceneRender();
 }
 
 function sceneRender() {
+  if(_buildingWorld20)return;
+  const far=Math.max(500,_orbit.dist*3+100);if(_camera.far!==far){_camera.far=far;_camera.updateProjectionMatrix()}
   const t = _orbit.target;
   _camera.position.set(
     t.x + _orbit.dist * Math.sin(_orbit.phi) * Math.cos(_orbit.theta),
@@ -304,15 +391,17 @@ function addRuler(x0, L, W, isLast) {
 
 /* ---------- Построение статики: транспорт + склады ---------- */
 
-function sceneBuild(vehicle, truckIdx) {
-  if(_cgGroup)_cgGroup.clear();
-  _vehGroup.traverse(o=>{o.geometry?.dispose();if(o.material){for(const m of Array.isArray(o.material)?o.material:[o.material]){m.map?.dispose();m.dispose()}}});
-  _vehGroup.clear();
-  _labelGroup.clear();
+function sceneBuild(vehicle, truckIdx,vehicles=vehicle?[vehicle]:[]) {
+  const key=JSON.stringify([LANG,vehicles]);
+  if(key===_sceneGeometryKey20){if(truckIdx!==_sceneActive20){_sceneActive20=truckIdx;focusTruck20(truckIdx,true)}return;}
+  const wasReady=!!_sceneGeometryKey20,previousActive=_sceneActive20,previousBounds=_sceneRecords20[truckIdx];
+  _sceneGeometryKey20=key;_sceneRecords20=projectSceneLayout(vehicles);_buildingWorld20=true;
+  if(_cgGroup)disposeSceneTree20(_cgGroup);
+  disposeSceneTree20(_vehGroup);disposeSceneTree20(_labelGroup);_axleLabelKey20='';
   _zones = [];
   _axlePos = [];
   // vehicle может быть null (все отсеки удалены) — рисуются только склады
-  const sections = vehicle ? getSections(vehicle) : [];
+  const sections = _sceneRecords20.flatMap(record=>record.sections.map(s=>({...s,sceneTruck:record.truck,sceneX:record.x+s.sceneLocalX,sceneZ:record.z,sceneVehicle:vehicles[record.truck]})));
   let offset = 0, maxW = 0, maxH = 0;
   let minX=0,maxX=0;
   const tireMat=new THREE.MeshPhongMaterial({color:0x25313d,shininess:8});
@@ -335,10 +424,11 @@ function sceneBuild(vehicle, truckIdx) {
       hub.rotation.x=Math.PI/2;hub.position.copy(wheel.position);group.add(hub);
     }
     _vehGroup.add(group);
+    originalAxle20(group,axis,W,x0);
     minX=Math.min(minX,x-r);maxX=Math.max(maxX,x+r);
   };
-  // The old STL contained its own axles. A wheel-free cab/chassis now uses
-  // the same explicit axle layout as the labels and calculation profile.
+  // The original STL body is retained; its embedded wheels were removed at
+  // build time. Every wheel assembly uses the same explicit physical layout.
   const addCab=(layout,W,x0)=>{
     const front=layout.axles.find(a=>a.kind==='tractor-front'||a.kind==='rigid-front');if(!front)return;
     const rear=layout.axles.filter(a=>a.kind==='tractor-rear');
@@ -351,15 +441,18 @@ function sceneBuild(vehicle, truckIdx) {
     for(const z of [W/2-cabW/2-.009,W/2+cabW/2+.009])addPart(cab,1.13,.72,.015,x-.2,base+1.35,z,glass);
     addPart(cab,.12,.16,cabW*.98,x-1.1,base+.1,W/2,chassisMat);
     const end=rear.length?x0+Math.max(...rear.map(a=>a.x))/1000+.65:x+.85;
-    addPart(cab,Math.max(.5,end-x),.18,.8,(x+end)/2,ground+.63,W/2,chassisMat);
+    addPart(cab,Math.max(.5,end-x),.18,.8,(x+end)/2,ground+.63,W/2,chassisMat).name='tractor-chassis';
     _vehGroup.add(cab);minX=Math.min(minX,x-1.2);
+    originalCab20(cab,front,W,x0,layout.kind==='rigid');
   };
 
   for (const s of sections) {
+    const childStart=_vehGroup.children.length;
+    const vehicle=s.sceneVehicle;offset=s.sceneX;
     const L = s.L / 1000, W = s.W / 1000, H = s.H / 1000;
     maxW = Math.max(maxW, W); maxH = Math.max(maxH, H);
     const bounds=loadingBounds(s);
-    _zones.push({kind:'sec',idx:s.index,x0:offset,z0:0,L:s.L,W:s.W,...bounds,section:s});
+    _zones.push({kind:'sec',idx:s.index,truck:s.sceneTruck,x0:offset,z0:s.sceneZ,L:s.L,W:s.W,...bounds,section:s});
     if(bounds.oversize){const frame=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry((bounds.maxX-bounds.minX)/1000,bounds.H/1000,(bounds.maxY-bounds.minY)/1000)),new THREE.LineBasicMaterial({color:0xc58b46,transparent:true,opacity:.5}));frame.position.set(offset+(bounds.minX+bounds.maxX)/2000,bounds.H/2000,(bounds.minY+bounds.maxY)/2000);_vehGroup.add(frame)}
 
     for(const deck of floorSegments(s)){
@@ -409,19 +502,21 @@ function sceneBuild(vehicle, truckIdx) {
     }
     // ворота сзади секции; у последней правая створка приоткрыта;
     // у бортового кузова — единый борт, откинутый вниз
-    const isLast = s === sections[sections.length - 1];
+    const isLast = s.index===_sceneRecords20[s.sceneTruck].sections.at(-1).index;
     if(!s.trailer)addDoors(offset + L, W, H, isLast, vehicle.body === 'flatbed');
     // линейка размеров кузова
     addRuler(offset, L, W, isLast);
-
+    const lane=new THREE.Group();lane.name='vehicle-section:'+s.sceneTruck+':'+s.index;lane.position.z=s.sceneZ;lane.userData={truck:s.sceneTruck,section:s.index};
+    for(const child of _vehGroup.children.slice(childStart))lane.add(child);_vehGroup.add(lane);
     offset += L + SECTION_GAP;
   }
-  const totalL = Math.max(0.1, offset - SECTION_GAP);
+  const totalL = Math.max(0.1,..._sceneRecords20.map(r=>r.maxX));
+  const firstZ=Math.min(0,..._sceneRecords20.map(r=>r.minZ)),lastZ=Math.max(maxW,..._sceneRecords20.map(r=>r.maxZ));
 
   // склады слева (z<0) и справа (z>W) — пунктирные зоны на земле
   const whL = Math.max(totalL, 8); // м
   for (const side of ['L', 'R']) {
-    const z0 = side === 'L' ? -WH_GAP - WH_DEPTH / 1000 : maxW + WH_GAP;
+    const z0 = side === 'L' ? firstZ-WH_GAP-WH_DEPTH/1000 : lastZ+WH_GAP;
     _zones.push({ kind: 'wh', side, x0: 0, z0,
                   L: whL * 1000, W: WH_DEPTH, H: 100000 });
     const g = new THREE.PlaneGeometry(whL, WH_DEPTH / 1000);
@@ -444,9 +539,9 @@ function sceneBuild(vehicle, truckIdx) {
   }
 
   maxX=Math.max(maxX,totalL);
-  _vehicleBounds={minX,maxX,minY:Math.min(-1.5,...sections.map(s=>-(s.trailer?.loadingHeight||1250)/1000-.9)),maxY:maxH,W:maxW};
-  _orbit.target = new THREE.Vector3((minX+maxX)/2, maxH/3, maxW/2);
-  _orbit.dist = Math.max(maxX-minX, maxW + 2 * (WH_GAP + WH_DEPTH / 1000), maxH) * 1.35 + 2;
+  _buildingWorld20=false;_sceneActive20=truckIdx;
+  if(_sceneRecords20.length){const current=_sceneRecords20[truckIdx],changed=!previousBounds||['minX','maxX','minY','maxY','minZ','maxZ'].some(k=>Math.abs(current[k]-previousBounds[k])>1e-6);_vehicleBounds={...current};if(!wasReady||previousActive!==truckIdx||changed)focusTruck20(truckIdx,wasReady)}
+  else{stopCameraFlight20();_vehicleBounds={minX,maxX,minY:-1.5,maxY:maxH,W:maxW,minZ:0,maxZ:maxW};_orbit.target.set((minX+maxX)/2,maxH/3,maxW/2);_orbit.dist=Math.max(12,maxX-minX)*1.35+2}
   sceneRender();
 }
 
@@ -455,7 +550,7 @@ function sceneBuild(vehicle, truckIdx) {
 function zoneOf(box) {
   if (box.zone.type === 'wh')
     return _zones.find(z => z.kind === 'wh' && z.side === box.zone.side);
-  return _zones.find(z => z.kind === 'sec' && z.idx === box.zone.section);
+  return _zones.find(z => z.kind === 'sec' && z.idx === box.zone.section && z.truck===box.zone.truck);
 }
 
 function boxWorld(box) {
@@ -472,7 +567,8 @@ function boxWorld(box) {
    boxes: [{id,x,y,z,l,w,h,item,zone,invalid,...}] */
 function sceneBoxes(boxes, colors, selectedId) {
   _boxes = boxes; _colors = colors; _selectedId = selectedId ?? _selectedId;
-  _cargoGroup.clear();
+  // Label textures are cached separately; dispose only per-box geometry/material.
+  for(const child of _cargoGroup.children){child.geometry?.dispose();child.material?.dispose()}_cargoGroup.clear();
   for (const b of boxes) {
     const wp = boxWorld(b);
     if (!wp) continue;
@@ -492,11 +588,13 @@ function sceneBoxes(boxes, colors, selectedId) {
         color: b.invalid ? 0xd32f2f : (sel ? 0xffd600 : 0x1b1f24),
         linewidth: 2 }));
     e.position.copy(m.position);
+    e.userData.forBox=b.id;
     _cargoGroup.add(e);
 
     // подпись места мелким шрифтом над верхней гранью
     const label = `${ci + 1}. ${b.item.name || t('pos')}`.slice(0, 26);
     const sp = boxLabelSprite(label);
+    sp.userData.forBox=b.id;
     sp.position.set(wp.x, (b.z + b.h) / 1000 + 0.14, wp.z);
     _cargoGroup.add(sp);
   }
@@ -532,7 +630,7 @@ function startDrag(mesh, e) {
 }
 
 function zoneKeyOf(zone) {
-  return zone.type === 'wh' ? 'wh' + zone.side : 'sec' + zone.section;
+  return zone.type === 'wh' ? 'wh' + zone.side : `sec:${zone.truck}:${zone.section}`;
 }
 
 /* Конфликт с учётом технологического зазора CARGO_GAP по горизонтали;
@@ -560,10 +658,10 @@ function moveDrag(e) {
 
   const zone = zoneAt(cx, cz, b);
   if (!zone) return;
-  const zoneKey = zone.kind === 'wh' ? 'wh' + zone.side : 'sec' + zone.idx;
+  const zoneKey = zone.kind === 'wh' ? 'wh' + zone.side : `sec:${zone.truck}:${zone.idx}`;
   const newZone = zone.kind === 'wh'
     ? { type: 'wh', side: zone.side }
-    : { type: 'truck', truck: _api.truckIdx ? _api.truckIdx() : 0, section: zone.idx };
+    : { type: 'truck', truck:zone.truck, section: zone.idx };
 
   // кандидат: локальные мм, жёсткий зажим в границы зоны
   let lx = (cx - zone.x0) * 1000 - b.l / 2;
@@ -629,7 +727,7 @@ function moveDrag(e) {
   const wp = boxWorld(b);
   for (const o of _cargoGroup.children) {
     if (o.userData && o.userData.boxId === b.id) o.position.set(wp.x, wp.y, wp.z);
-    else if (o.isLineSegments && o.userData.forBox === b.id) o.position.set(wp.x, wp.y, wp.z);
+    else if (o.userData.forBox === b.id) o.position.set(wp.x,o.isSprite?(b.z+b.h)/1000+.14:wp.y,wp.z);
   }
   sceneRender();
 }
@@ -637,19 +735,18 @@ function moveDrag(e) {
 function sameZone(a, b) {
   if (a.zone.type !== b.zone.type) return false;
   if (a.zone.type === 'wh') return a.zone.side === b.zone.side;
-  return a.zone.section === b.zone.section;
+  return a.zone.truck===b.zone.truck&&a.zone.section === b.zone.section;
 }
 
 function zoneAt(wx, wz, box) {
   // секции: приоритет, с допуском по ширине
   for (const z of _zones) {
     if (z.kind !== 'sec') continue;
-    if(wx>=z.x0+(z.minX||0)/1000-.3&&wx<=z.x0+(z.maxX??z.L)/1000+.3&&wz>=(z.minY||0)/1000-.45&&wz<=(z.maxY??z.W)/1000+.45)return z;
+    if(wx>=z.x0+(z.minX||0)/1000-.3&&wx<=z.x0+(z.maxX??z.L)/1000+.3&&wz>=z.z0+(z.minY||0)/1000-.45&&wz<=z.z0+(z.maxY??z.W)/1000+.45)return z;
   }
   for (const z of _zones) {
     if (z.kind !== 'wh') continue;
-    if (z.side === 'L' && wz < 0) return z;
-    if (z.side === 'R' && wz > 0) return z;
+    if(wx>=z.x0&&wx<=z.x0+z.L/1000&&wz>=z.z0&&wz<=z.z0+z.W/1000)return z;
   }
   return null;
 }
@@ -683,5 +780,11 @@ function sceneScreenshot() {
   return _renderer.domElement.toDataURL('image/png');
 }
 
-function sceneSetCg(points){if(!_cgGroup)return;for(const child of _cgGroup.children){child.geometry?.dispose();if(child.material?.map)child.material.map.dispose();child.material?.dispose()}_cgGroup.clear();for(const point of points){if(!point.visible)continue;const zone=_zones.find(z=>z.kind==='sec'&&z.idx===point.section);if(!zone)continue;const sphere=new THREE.Mesh(new THREE.SphereGeometry(.13,16,12),new THREE.MeshBasicMaterial({color:point.manual?0xc78d48:0x337f99,depthTest:false,depthWrite:false}));sphere.position.set(zone.x0+point.x/1000,Math.max(.14,point.z/1000),point.y/1000);sphere.userData.section=point.section;sphere.userData.manual=point.manual;sphere.renderOrder=999;_cgGroup.add(sphere);const label=makeTextSprite(point.manual?'Целевой ЦМ':'Фактический ЦМ',point.manual?'#9b6e39':'#337f99',.3);label.position.copy(sphere.position);label.position.y+=.3;label.material.depthTest=false;label.renderOrder=1000;_cgGroup.add(label)}sceneRender()}
+function sceneSetCg(points){
+ if(!_cgGroup)return;disposeSceneTree20(_cgGroup);
+ for(const point of points){if(!point.visible)continue;const zone=_zones.find(z=>z.kind==='sec'&&z.idx===point.section&&z.truck===_sceneActive20);if(!zone)continue;
+ const sphere=new THREE.Mesh(new THREE.SphereGeometry(.13,16,12),new THREE.MeshBasicMaterial({color:point.manual?0xc78d48:0x337f99,depthTest:false,depthWrite:false}));sphere.position.set(zone.x0+point.x/1000,Math.max(.14,point.z/1000),zone.z0+point.y/1000);sphere.userData={section:point.section,truck:_sceneActive20,manual:point.manual};sphere.renderOrder=999;_cgGroup.add(sphere);
+ const label=makeTextSprite(point.manual?'Целевой ЦМ':'Фактический ЦМ',point.manual?'#9b6e39':'#337f99',.3);label.position.copy(sphere.position);label.position.y+=.3;label.material.depthTest=false;label.renderOrder=1000;_cgGroup.add(label);
+ }sceneRender();
+}
 function pickCg(e){if(!_cgGroup)return null;const r=_canvasEl.getBoundingClientRect();_mouse.x=((e.clientX-r.left)/r.width)*2-1;_mouse.y=-((e.clientY-r.top)/r.height)*2+1;_raycaster.setFromCamera(_mouse,_camera);return _raycaster.intersectObjects(_cgGroup.children.filter(o=>o.isMesh&&o.userData.manual))[0]?.object||null}

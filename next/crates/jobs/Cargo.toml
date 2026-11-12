@@ -1,0 +1,10 @@
+[package]
+name = "nexsearch-jobs"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+[dependencies]
+tokio.workspace = true
+uuid.workspace = true
+[lints]
+workspace = true

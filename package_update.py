@@ -3,7 +3,7 @@ from pathlib import Path
 import sys,os,json,base64,zipfile,hashlib,argparse,subprocess,time
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 ROOT=Path(__file__).resolve().parent
-IGNORED={'.git','.updates','.github','.runtime','identity','__pycache__','.pytest_cache','build','dist','preview','research','tests','company-collector','.venv','node_modules','deployment'}
+IGNORED={'.git','.updates','.github','.runtime','identity','__pycache__','.pytest_cache','build','dist','preview','research','tests','company-collector','.venv','node_modules','deployment','next'}
 def source_files():
  for p in ROOT.rglob('*'):
   rel=p.relative_to(ROOT)

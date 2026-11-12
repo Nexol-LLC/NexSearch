@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-workspace-recommendations"
+description = "Enables the workspace_recommendations command without any pre-configured scope."
+commands.allow = ["workspace_recommendations"]
+
+[[permission]]
+identifier = "deny-workspace-recommendations"
+description = "Denies the workspace_recommendations command without any pre-configured scope."
+commands.deny = ["workspace_recommendations"]
